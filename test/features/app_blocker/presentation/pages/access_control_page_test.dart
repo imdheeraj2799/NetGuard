@@ -122,8 +122,7 @@ void main() {
     expect(find.text('youtube.com'), findsOneWidget);
     expect(find.text('netflix.com'), findsOneWidget);
     expect(find.text('Night Restrictions'), findsOneWidget);
-    expect(find.text('WEAVE NEW RULE'), findsOneWidget);
-    expect(find.text('SASHIKO PROTOCOL ACTIVE'), findsOneWidget);
+    expect(find.text('More Options'), findsOneWidget);
   });
 
   testWidgets('Tapping Block Installed Applications in bottomsheet navigates without bloc error', (
@@ -135,8 +134,8 @@ void main() {
 
     await tester.pumpWidget(buildTestableWidget());
 
-    // Tap WEAVE NEW RULE to open bottomsheet
-    await tester.tap(find.text('WEAVE NEW RULE'));
+    // Tap More Options to open bottomsheet
+    await tester.tap(find.text('More Options'));
     await tester.pumpAndSettle();
 
     expect(find.text('Create Time-Based Schedule'), findsOneWidget);
@@ -160,7 +159,7 @@ void main() {
 
     await tester.pumpWidget(buildTestableWidget());
 
-    await tester.tap(find.text('WEAVE NEW RULE'));
+    await tester.tap(find.text('More Options'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Create Time-Based Schedule'));
