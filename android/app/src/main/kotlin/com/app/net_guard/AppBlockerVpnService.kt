@@ -109,8 +109,16 @@ class AppBlockerVpnService : VpnService() {
 
                 saveBlockedPackages(this, blockedPackages)
                 saveDnsBlacklist(this, blacklist)
-                startForeground(NOTIFICATION_ID, createNotification(blockedPackages.size, blacklist.size))
-                configureVpn(blockedPackages, blacklist)
+                try {
+                    startForeground(NOTIFICATION_ID, createNotification(blockedPackages.size, blacklist.size))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to start foreground notification: ${e.message}")
+                }
+                try {
+                    configureVpn(blockedPackages, blacklist)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to configure VPN: ${e.message}")
+                }
             }
         }
         return START_STICKY
@@ -138,25 +146,31 @@ class AppBlockerVpnService : VpnService() {
             .addAddress(IPV4_ADDRESS, 32)
             .addAddress(IPV6_ADDRESS, 128)
 
-        // Protect NetGuard itself so upstream DNS queries don't loop into the TUN interface
-        try {
-            builder.addDisallowedApplication(packageName)
-        } catch (_: Exception) {
-        }
-
         if (dnsBlacklist.isNotEmpty()) {
+            // In DNS filtering mode, NetGuard itself is disallowed so upstream DNS queries don't loop into the TUN interface
+            try {
+                builder.addDisallowedApplication(packageName)
+            } catch (_: Exception) {
+            }
             builder.addDnsServer(LOCAL_DNS_SERVER)
             builder.addRoute(LOCAL_DNS_SERVER, 32)
-            builder.addRoute("0.0.0.0", 0)
         } else if (blockedPackages.isNotEmpty()) {
+            // In package sinkhole mode, route traffic ONLY for blocked packages.
+            // DO NOT call addDisallowedApplication here because addAllowedApplication and
+            // addDisallowedApplication are mutually exclusive in Android VpnService.Builder
+            // and calling both throws java.lang.UnsupportedOperationException.
             builder.addRoute("0.0.0.0", 0)
             builder.addRoute("::", 0)
-            blockedPackages.forEach { packageName ->
+            blockedPackages.forEach { pkg ->
                 try {
-                    builder.addAllowedApplication(packageName)
-                } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                    builder.addAllowedApplication(pkg)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to add allowed application $pkg: ${e.message}")
                 }
             }
+        } else {
+            stopSelf()
+            return
         }
 
         val descriptor = try {

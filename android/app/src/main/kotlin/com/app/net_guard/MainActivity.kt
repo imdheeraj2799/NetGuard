@@ -80,8 +80,16 @@ class MainActivity : FlutterFragmentActivity() {
         val pendingRequest = pendingVpnStart ?: return
         pendingVpnStart = null
         if (resultCode == RESULT_OK) {
-            startVpnService(pendingRequest.blockedPackages, AppBlockerVpnService.ACTION_START)
-            pendingRequest.result.success(null)
+            try {
+                startVpnService(pendingRequest.blockedPackages, AppBlockerVpnService.ACTION_START)
+                pendingRequest.result.success(null)
+            } catch (e: Exception) {
+                pendingRequest.result.error(
+                    "vpn_start_error",
+                    "Failed to start VPN service: ${e.message}",
+                    null,
+                )
+            }
         } else {
             pendingRequest.result.error(
                 "vpn_permission_denied",
@@ -239,10 +247,14 @@ class MainActivity : FlutterFragmentActivity() {
                 AppBlockerVpnService.EXTRA_DNS_BLACKLIST,
                 ArrayList(blacklist),
             )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to start VPN service: ${e.message}")
         }
     }
 
