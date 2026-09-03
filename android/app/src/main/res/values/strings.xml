@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Net Guard</string>
+    <string name="vpn_notification_channel_name">App blocking VPN</string>
+    <string name="vpn_notification_channel_description">Keeps selected applications offline.</string>
+    <string name="vpn_notification_title">App blocking is active</string>
+    <string name="vpn_notification_text">Network blocked for %1$d app(s)</string>
+</resources>
