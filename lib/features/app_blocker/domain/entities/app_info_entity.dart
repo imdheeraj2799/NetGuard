@@ -15,12 +15,20 @@ class AppInfoEntity {
   final Uint8List? iconBytes;
   final String? iconPath;
 
-  AppInfoEntity copyWith({bool? isBlocked}) => AppInfoEntity(
-    appName: appName,
-    packageName: packageName,
+  bool get isInternetAllowed => !isBlocked;
+
+  AppInfoEntity copyWith({
+    String? appName,
+    String? packageName,
+    bool? isBlocked,
+    Uint8List? iconBytes,
+    String? iconPath,
+  }) => AppInfoEntity(
+    appName: appName ?? this.appName,
+    packageName: packageName ?? this.packageName,
     isBlocked: isBlocked ?? this.isBlocked,
-    iconBytes: iconBytes,
-    iconPath: iconPath,
+    iconBytes: iconBytes ?? this.iconBytes,
+    iconPath: iconPath ?? this.iconPath,
   );
 
   @override
