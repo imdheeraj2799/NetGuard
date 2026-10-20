@@ -19,23 +19,34 @@ class AppBlockerLoaded extends AppBlockerState {
     required this.filteredApps,
     this.searchQuery = '',
     this.filter = AppBlockerFilter.all,
+    this.actionErrorMessage,
   });
 
   final List<AppInfoEntity> originalApps;
   final List<AppInfoEntity> filteredApps;
   final String searchQuery;
   final AppBlockerFilter filter;
+  final String? actionErrorMessage;
+
+  int get blockedAppsCount => originalApps.where((app) => app.isBlocked).length;
+  int get allowedAppsCount => originalApps.where((app) => !app.isBlocked).length;
+  bool get isFirewallActive => blockedAppsCount > 0;
 
   AppBlockerLoaded copyWith({
     List<AppInfoEntity>? originalApps,
     List<AppInfoEntity>? filteredApps,
     String? searchQuery,
     AppBlockerFilter? filter,
+    String? actionErrorMessage,
+    bool clearActionErrorMessage = false,
   }) => AppBlockerLoaded(
     originalApps: originalApps ?? this.originalApps,
     filteredApps: filteredApps ?? this.filteredApps,
     searchQuery: searchQuery ?? this.searchQuery,
     filter: filter ?? this.filter,
+    actionErrorMessage: clearActionErrorMessage
+        ? null
+        : (actionErrorMessage ?? this.actionErrorMessage),
   );
 }
 

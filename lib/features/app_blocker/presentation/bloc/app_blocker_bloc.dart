@@ -19,8 +19,10 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
        super(const AppBlockerInitial()) {
     on<LoadInstalledAppsEvent>(_onLoadInstalledApps);
     on<ToggleAppBlockEvent>(_onToggleAppBlock);
+    on<ToggleAppInternetAccessEvent>(_onToggleAppInternetAccess);
     on<SearchAppEvent>(_onSearchApp);
     on<FilterBlockedEvent>(_onFilterBlocked);
+    on<ClearErrorMessageEvent>(_onClearErrorMessage);
   }
 
   final GetInstalledAppsUseCase _getInstalledApps;
@@ -52,6 +54,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
               : app,
         )
         .toList(growable: false);
+
     emit(
       _loadedState(
         originalApps: optimisticallyUpdated,
@@ -66,7 +69,24 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
         isBlocked: event.isBlocked,
       ),
     );
-    result.fold((failure) => emit(AppBlockerError(failure.message)), (_) {});
+
+    result.fold(
+      (failure) => emit(AppBlockerError(failure.message)),
+      (_) {},
+    );
+  }
+
+  Future<void> _onToggleAppInternetAccess(
+    ToggleAppInternetAccessEvent event,
+    Emitter<AppBlockerState> emit,
+  ) async {
+    await _onToggleAppBlock(
+      ToggleAppBlockEvent(
+        packageName: event.packageName,
+        isBlocked: !event.isInternetAllowed,
+      ),
+      emit,
+    );
   }
 
   void _onSearchApp(SearchAppEvent event, Emitter<AppBlockerState> emit) {
@@ -96,10 +116,20 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     );
   }
 
+  void _onClearErrorMessage(
+    ClearErrorMessageEvent event,
+    Emitter<AppBlockerState> emit,
+  ) {
+    final currentState = state;
+    if (currentState is! AppBlockerLoaded) return;
+    emit(currentState.copyWith(clearActionErrorMessage: true));
+  }
+
   AppBlockerLoaded _loadedState({
     required List<AppInfoEntity> originalApps,
     String searchQuery = '',
     AppBlockerFilter filter = AppBlockerFilter.all,
+    String? actionErrorMessage,
   }) => AppBlockerLoaded(
     originalApps: List.unmodifiable(originalApps),
     filteredApps: List.unmodifiable(
@@ -107,6 +137,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     ),
     searchQuery: searchQuery,
     filter: filter,
+    actionErrorMessage: actionErrorMessage,
   );
 
   bool _matches(
