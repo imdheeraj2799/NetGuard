@@ -93,6 +93,12 @@ class _DashboardPageState extends State<DashboardPage> {
                     child: _buildHeader(context, state),
                   ),
 
+                  // VPN Service Status & Alert Banner
+                  if (state is AppBlockerLoaded)
+                    SliverToBoxAdapter(
+                      child: _buildVpnStatusCard(context, state),
+                    ),
+
                   // Search Bar
                   SliverToBoxAdapter(
                     child: _buildSearchBar(context, state),
@@ -118,6 +124,39 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _buildHeader(BuildContext context, AppBlockerState state) {
     final isFirewallActive = state is AppBlockerLoaded && state.isFirewallActive;
     final blockedCount = state is AppBlockerLoaded ? state.blockedAppsCount : 0;
+    final vpnStatus = state is AppBlockerLoaded ? state.vpnStatus : VpnStatus.inactive;
+
+    final String badgeText;
+    final IconData badgeIcon;
+    final Color badgeColor;
+    final Color badgeBg;
+    final Color badgeBorder;
+
+    if (vpnStatus == VpnStatus.restarting) {
+      badgeText = 'Restarting';
+      badgeIcon = Icons.sync_problem_rounded;
+      badgeColor = const Color(0xFFFBBF24);
+      badgeBg = const Color(0xFF382A0D);
+      badgeBorder = const Color(0xFFD97706);
+    } else if (vpnStatus == VpnStatus.inactive && blockedCount > 0) {
+      badgeText = 'Inactive';
+      badgeIcon = Icons.shield_outlined;
+      badgeColor = const Color(0xFFF87171);
+      badgeBg = const Color(0xFF3B1818);
+      badgeBorder = const Color(0xFFDC2626);
+    } else if (isFirewallActive) {
+      badgeText = '$blockedCount Blocked';
+      badgeIcon = Icons.shield_rounded;
+      badgeColor = AppColors.activeGreen;
+      badgeBg = const Color(0xFF1E3A2F);
+      badgeBorder = AppColors.activeGreen;
+    } else {
+      badgeText = 'All Allowed';
+      badgeIcon = Icons.shield_outlined;
+      badgeColor = AppColors.textSecondary;
+      badgeBg = AppColors.cardBackground;
+      badgeBorder = AppColors.cardBorder;
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
@@ -149,45 +188,201 @@ class _DashboardPageState extends State<DashboardPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: isFirewallActive
-                  ? const Color(0xFF1E3A2F)
-                  : AppColors.cardBackground,
+              color: badgeBg,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: isFirewallActive
-                    ? AppColors.activeGreen
-                    : AppColors.cardBorder,
-              ),
+              border: Border.all(color: badgeBorder),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  isFirewallActive
-                      ? Icons.shield_rounded
-                      : Icons.shield_outlined,
+                  badgeIcon,
                   size: 16,
-                  color: isFirewallActive
-                      ? AppColors.activeGreen
-                      : AppColors.textSecondary,
+                  color: badgeColor,
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  isFirewallActive
-                      ? '$blockedCount Blocked'
-                      : 'All Allowed',
+                  badgeText,
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: isFirewallActive
-                        ? AppColors.activeGreen
-                        : AppColors.textSecondary,
+                    color: badgeColor,
                   ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildVpnStatusCard(BuildContext context, AppBlockerLoaded state) {
+    final vpnStatus = state.vpnStatus;
+    final isInactiveWithRules =
+        vpnStatus == VpnStatus.inactive && state.blockedAppsCount > 0;
+    final isRestarting = vpnStatus == VpnStatus.restarting;
+
+    if (isInactiveWithRules || isRestarting) {
+      final title = isRestarting
+          ? 'Firewall Protection: Restarting'
+          : 'Firewall Protection: Inactive';
+      final reasonText = state.vpnStatusReason ??
+          (isRestarting
+              ? 'Attempting to re-establish VPN firewall rules...'
+              : 'VPN service is inactive. Firewall rules are temporarily not enforced.');
+
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isRestarting
+                ? const Color(0xFF261D0C)
+                : const Color(0xFF2C1315),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isRestarting
+                  ? const Color(0xFFD97706)
+                  : const Color(0xFFDC2626),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isRestarting
+                        ? Icons.sync_rounded
+                        : Icons.warning_amber_rounded,
+                    color: isRestarting
+                        ? const Color(0xFFFBBF24)
+                        : const Color(0xFFF87171),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: isRestarting
+                            ? const Color(0xFFFBBF24)
+                            : const Color(0xFFF87171),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (isRestarting)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Color(0xFFFBBF24),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                reasonText,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  height: 1.3,
+                ),
+              ),
+              if (!isRestarting) ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text(
+                      'Restore Protection',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    onPressed: () {
+                      context
+                          .read<AppBlockerBloc>()
+                          .add(const RestartVpnEvent());
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    final isActive = vpnStatus == VpnStatus.active;
+    final statusLabel = isActive ? 'Active' : 'Inactive';
+    final statusColor =
+        isActive ? AppColors.activeGreen : AppColors.textSecondary;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.cardBackground,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.cardBorderSubtle),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: statusColor,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'VPN Status: ',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            Text(
+              statusLabel,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: statusColor,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              isActive ? 'Enforcing firewall' : 'Idle',
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
