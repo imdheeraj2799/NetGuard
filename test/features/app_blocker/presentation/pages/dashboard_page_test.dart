@@ -146,4 +146,34 @@ void main() {
 
     expect(find.text('No applications matching "nonexistent"'), findsOneWidget);
   });
+
+  testWidgets('scrolling to bottom dispatches LoadMoreAppsEvent when hasReachedMax is false', (tester) async {
+    final manyApps = List.generate(
+      20,
+      (i) => AppInfoEntity(
+        appName: 'App $i',
+        packageName: 'com.app.$i',
+        isBlocked: false,
+      ),
+    );
+
+    when(() => bloc.state).thenReturn(
+      AppBlockerLoaded(
+        originalApps: manyApps,
+        filteredApps: manyApps,
+        displayedApps: manyApps.take(15).toList(),
+        page: 1,
+        pageSize: 15,
+        hasReachedMax: false,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    // Scroll down to the bottom
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1000));
+    await tester.pump();
+
+    verify(() => bloc.add(const LoadMoreAppsEvent())).called(1);
+  });
 }

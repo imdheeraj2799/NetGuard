@@ -2,8 +2,9 @@ import 'package:dartz/dartz.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:net_guard/core/error/failure.dart';
-import 'package:net_guard/features/app_blocker/data/datasources/local_storage_data_source.dart';
+import 'package:net_guard/features/app_blocker/data/datasources/app_local_data_source.dart';
 import 'package:net_guard/features/app_blocker/data/datasources/installed_apps_data_source.dart';
+import 'package:net_guard/features/app_blocker/data/datasources/local_storage_data_source.dart';
 import 'package:net_guard/features/app_blocker/data/datasources/native_app_data_source.dart';
 import 'package:net_guard/features/app_blocker/data/models/app_info_model.dart';
 import 'package:net_guard/features/app_blocker/data/repositories/app_blocker_repository_impl.dart';
@@ -16,66 +17,181 @@ class MockInstalledAppsDataSource extends Mock
 class MockLocalStorageDataSource extends Mock
     implements LocalStorageDataSource {}
 
+class MockAppLocalDataSource extends Mock implements AppLocalDataSource {}
+
+class FakeAppInfoModel extends Fake implements AppInfoModel {}
+
 void main() {
   late MockNativeAppDataSource native;
   late MockInstalledAppsDataSource installedApps;
   late MockLocalStorageDataSource storage;
+  late MockAppLocalDataSource localDataSource;
   late AppBlockerRepositoryImpl repository;
+
+  setUpAll(() {
+    registerFallbackValue(FakeAppInfoModel());
+  });
 
   setUp(() {
     native = MockNativeAppDataSource();
     installedApps = MockInstalledAppsDataSource();
     storage = MockLocalStorageDataSource();
+    localDataSource = MockAppLocalDataSource();
+
+    when(() => localDataSource.getCachedApps()).thenAnswer((_) async => []);
+    when(() => localDataSource.cacheApps(any())).thenAnswer((_) async {});
+    when(() => localDataSource.saveApp(any())).thenAnswer((_) async {});
+    when(() => localDataSource.deleteApps(any())).thenAnswer((_) async {});
+    when(() => localDataSource.setFirstLaunchCompleted()).thenAnswer((_) async {});
+
     repository = AppBlockerRepositoryImpl(
       installedAppsDataSource: installedApps,
       nativeDataSource: native,
       localStorageDataSource: storage,
+      appLocalDataSource: localDataSource,
     );
   });
 
-  test('overlays local blocked status on installed applications', () async {
-    when(() => installedApps.getInstalledApps()).thenAnswer(
-      (_) async => [
-        const AppInfoModel(
-          appName: 'Mail',
-          packageName: 'mail',
-          isBlocked: false,
-        ),
-        const AppInfoModel(
-          appName: 'Maps',
-          packageName: 'maps',
-          isBlocked: false,
-        ),
-      ],
-    );
-    when(() => storage.getBlockedPackages()).thenAnswer((_) async => ['mail']);
+  group('First Launch', () {
+    test('stores whole installed application list in local storage on first launch', () async {
+      when(() => localDataSource.isFirstLaunch()).thenAnswer((_) async => true);
+      when(() => installedApps.getInstalledApps()).thenAnswer(
+        (_) async => [
+          const AppInfoModel(
+            appName: 'Mail',
+            packageName: 'mail',
+            isBlocked: false,
+          ),
+          const AppInfoModel(
+            appName: 'Maps',
+            packageName: 'maps',
+            isBlocked: false,
+          ),
+        ],
+      );
+      when(() => storage.getBlockedPackages()).thenAnswer((_) async => ['mail']);
+      when(() => localDataSource.getCachedApps()).thenAnswer(
+        (_) async => [
+          const AppInfoModel(
+            appName: 'Mail',
+            packageName: 'mail',
+            isBlocked: true,
+          ),
+          const AppInfoModel(
+            appName: 'Maps',
+            packageName: 'maps',
+            isBlocked: false,
+          ),
+        ],
+      );
 
-    final result = await repository.getInstalledApps();
+      final result = await repository.getInstalledApps();
 
-    expect(result, isA<Right<Failure, List<dynamic>>>());
-    result.fold(
-      (_) => fail('Expected apps'),
-      (apps) => expect(apps.map((app) => app.isBlocked), [true, false]),
-    );
+      expect(result, isA<Right<Failure, List<dynamic>>>());
+      result.fold(
+        (_) => fail('Expected apps'),
+        (apps) => expect(apps.map((app) => app.isBlocked), [true, false]),
+      );
+      verify(() => localDataSource.cacheApps(any())).called(1);
+      verify(() => localDataSource.setFirstLaunchCompleted()).called(1);
+    });
   });
 
-  test(
-    'returns platform failure when installed applications cannot be read',
-    () async {
-      when(() => installedApps.getInstalledApps())
-          .thenThrow(const InstalledAppsException('permission denied'));
+  group('Subsequent Launch & Conflict Resolution', () {
+    test('detects uninstalled applications, removes them from cache and cleans up firewall', () async {
+      when(() => localDataSource.isFirstLaunch()).thenAnswer((_) async => false);
+      // Cached apps had 'mail' (blocked) and 'game' (unblocked)
+      when(() => localDataSource.getCachedApps()).thenAnswer(
+        (_) async => [
+          const AppInfoModel(
+            appName: 'Mail',
+            packageName: 'mail',
+            isBlocked: true,
+          ),
+          const AppInfoModel(
+            appName: 'Game',
+            packageName: 'game',
+            isBlocked: false,
+          ),
+        ],
+      );
+      // Device now ONLY has 'game' (Mail was uninstalled by user)
+      when(() => installedApps.getInstalledApps()).thenAnswer(
+        (_) async => [
+          const AppInfoModel(
+            appName: 'Game',
+            packageName: 'game',
+            isBlocked: false,
+          ),
+        ],
+      );
+      when(() => storage.getBlockedPackages()).thenAnswer((_) async => ['mail']);
+      when(() => storage.setBlockedPackages(any())).thenAnswer((_) async {});
+      when(() => native.stopVpnService()).thenAnswer((_) async {});
+
+      final result = await repository.getInstalledApps();
+
+      expect(result, isA<Right<Failure, List<dynamic>>>());
+      // Verify uninstalled app was removed from Hive cache
+      verify(() => localDataSource.deleteApps(['mail'])).called(1);
+      // Verify blocked list updated and VPN stopped since no blocked apps remain
+      verify(() => storage.setBlockedPackages([])).called(1);
+      verify(() => native.stopVpnService()).called(1);
+    });
+
+    test('detects newly installed applications and adds them to local storage', () async {
+      when(() => localDataSource.isFirstLaunch()).thenAnswer((_) async => false);
+      when(() => localDataSource.getCachedApps()).thenAnswer(
+        (_) async => [
+          const AppInfoModel(
+            appName: 'Mail',
+            packageName: 'mail',
+            isBlocked: false,
+          ),
+        ],
+      );
+      // Device has Mail and newly installed Browser
+      when(() => installedApps.getInstalledApps()).thenAnswer(
+        (_) async => [
+          const AppInfoModel(
+            appName: 'Mail',
+            packageName: 'mail',
+            isBlocked: false,
+          ),
+          const AppInfoModel(
+            appName: 'Browser',
+            packageName: 'browser',
+            isBlocked: false,
+          ),
+        ],
+      );
       when(() => storage.getBlockedPackages()).thenAnswer((_) async => []);
 
       final result = await repository.getInstalledApps();
 
-      expect(
-        result.fold((failure) => failure, (_) => null),
-        isA<PlatformFailure>(),
-      );
-    },
-  );
+      expect(result, isA<Right<Failure, List<dynamic>>>());
+      final captured = verify(() => localDataSource.cacheApps(captureAny())).captured;
+      final cachedNew = captured.single as List<AppInfoModel>;
+      expect(cachedNew.map((a) => a.packageName), ['browser']);
+    });
+  });
+
+  test('returns platform failure when installed applications cannot be read', () async {
+    when(() => localDataSource.isFirstLaunch()).thenAnswer((_) async => true);
+    when(() => installedApps.getInstalledApps())
+        .thenThrow(const InstalledAppsException('permission denied'));
+    when(() => storage.getBlockedPackages()).thenAnswer((_) async => []);
+
+    final result = await repository.getInstalledApps();
+
+    expect(
+      result.fold((failure) => failure, (_) => null),
+      isA<PlatformFailure>(),
+    );
+  });
 
   test('returns cache failure when blocked cache cannot be read', () async {
+    when(() => localDataSource.isFirstLaunch()).thenAnswer((_) async => true);
     when(() => installedApps.getInstalledApps()).thenAnswer((_) async => []);
     when(() => storage.getBlockedPackages())
         .thenThrow(const LocalStorageException('read failed'));

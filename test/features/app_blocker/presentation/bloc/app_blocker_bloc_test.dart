@@ -167,4 +167,49 @@ void main() {
       ),
     ],
   );
+
+  final twentyApps = List.generate(
+    20,
+    (index) => AppInfoEntity(
+      appName: 'App $index',
+      packageName: 'com.app.$index',
+      isBlocked: false,
+    ),
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'loads 15 items on page 1 when 20 apps are available',
+    build: () {
+      when(() => getInstalledApps(const NoParams()))
+          .thenAnswer((_) async => Right(twentyApps));
+      return buildBloc();
+    },
+    act: (bloc) => bloc.add(const LoadInstalledAppsEvent()),
+    expect: () => [
+      isA<AppBlockerLoading>(),
+      isA<AppBlockerLoaded>()
+          .having((s) => s.originalApps.length, 'originalApps length', 20)
+          .having((s) => s.displayedApps.length, 'displayedApps length', 15)
+          .having((s) => s.page, 'page', 1)
+          .having((s) => s.hasReachedMax, 'hasReachedMax', isFalse),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'LoadMoreAppsEvent loads the remaining items and marks hasReachedMax as true',
+    build: () => buildBloc(),
+    seed: () => AppBlockerLoaded(
+      originalApps: twentyApps,
+      filteredApps: twentyApps,
+      page: 1,
+      pageSize: 15,
+    ),
+    act: (bloc) => bloc.add(const LoadMoreAppsEvent()),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.displayedApps.length, 'displayedApps length', 20)
+          .having((s) => s.page, 'page', 2)
+          .having((s) => s.hasReachedMax, 'hasReachedMax', isTrue),
+    ],
+  );
 }
