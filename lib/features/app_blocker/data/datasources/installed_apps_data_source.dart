@@ -1,4 +1,3 @@
-import 'package:installed_apps/app_info.dart';
 import 'package:installed_apps/installed_apps.dart';
 
 import '../models/app_info_model.dart';
