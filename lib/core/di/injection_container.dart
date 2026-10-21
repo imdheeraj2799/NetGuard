@@ -9,7 +9,10 @@ import '../../features/app_blocker/data/datasources/native_app_data_source.dart'
 import '../../features/app_blocker/data/repositories/app_blocker_repository_impl.dart';
 import '../../features/app_blocker/domain/repositories/app_blocker_repository.dart';
 import '../../features/app_blocker/domain/usecases/get_installed_apps_usecase.dart';
+import '../../features/app_blocker/domain/usecases/get_vpn_status_usecase.dart';
+import '../../features/app_blocker/domain/usecases/restart_vpn_usecase.dart';
 import '../../features/app_blocker/domain/usecases/toggle_block_status_usecase.dart';
+import '../../features/app_blocker/domain/usecases/watch_vpn_status_usecase.dart';
 import '../../features/app_blocker/presentation/bloc/app_blocker_bloc.dart';
 
 final serviceLocator = GetIt.instance;
@@ -61,10 +64,16 @@ Future<void> initializeDependencies({
     )
     ..registerLazySingleton(() => GetInstalledAppsUseCase(serviceLocator()))
     ..registerLazySingleton(() => ToggleBlockStatusUseCase(serviceLocator()))
+    ..registerLazySingleton(() => GetVpnStatusUseCase(serviceLocator()))
+    ..registerLazySingleton(() => WatchVpnStatusUseCase(serviceLocator()))
+    ..registerLazySingleton(() => RestartVpnUseCase(serviceLocator()))
     ..registerFactory(
       () => AppBlockerBloc(
         getInstalledApps: serviceLocator(),
         toggleBlockStatus: serviceLocator(),
+        getVpnStatus: serviceLocator(),
+        watchVpnStatus: serviceLocator(),
+        restartVpn: serviceLocator(),
       ),
     );
 }
