@@ -5,11 +5,13 @@ import android.net.VpnService
 import android.os.Build
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     private var pendingVpnStart: PendingVpnStart? = null
+    private val vpnStatusListeners = mutableListOf<EventChannel.EventSink>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -27,6 +29,42 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             LEGACY_TRAFFIC_CHANNEL,
         ).setMethodCallHandler(trafficHandler)
+
+        val statusStreamHandler = object : EventChannel.StreamHandler {
+            private var monitorListener: ((VpnStatusData) -> Unit)? = null
+
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                if (events == null) return
+                vpnStatusListeners.add(events)
+                val current = VpnStatusMonitor.getCurrentStatus(this@MainActivity)
+                events.success(current.toMap())
+
+                val listener: (VpnStatusData) -> Unit = { data ->
+                    runOnUiThread {
+                        try {
+                            events.success(data.toMap())
+                        } catch (_: Exception) {}
+                    }
+                }
+                monitorListener = listener
+                VpnStatusMonitor.addListener(listener)
+            }
+
+            override fun onCancel(arguments: Any?) {
+                monitorListener?.let { VpnStatusMonitor.removeListener(it) }
+                monitorListener = null
+            }
+        }
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            VPN_STATUS_CHANNEL,
+        ).setStreamHandler(statusStreamHandler)
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            LEGACY_VPN_STATUS_CHANNEL,
+        ).setStreamHandler(statusStreamHandler)
     }
 
     override fun onDestroy() {
@@ -36,6 +74,7 @@ class MainActivity : FlutterFragmentActivity() {
             null,
         )
         pendingVpnStart = null
+        vpnStatusListeners.clear()
         super.onDestroy()
     }
 
@@ -58,6 +97,11 @@ class MainActivity : FlutterFragmentActivity() {
                 )
             }
         } else {
+            VpnStatusMonitor.update(
+                VpnState.INACTIVE,
+                pendingRequest.blockedPackages.size,
+                "VPN permission was denied. Applications are unprotected.",
+            )
             pendingRequest.result.error(
                 "vpn_permission_denied",
                 "VPN permission was denied. No applications were blocked.",
@@ -93,7 +137,40 @@ class MainActivity : FlutterFragmentActivity() {
                     startActivityForResult(permissionIntent, VPN_PERMISSION_REQUEST_CODE)
                 }
             }
+            "getVpnStatus" -> {
+                val status = VpnStatusMonitor.getCurrentStatus(this)
+                result.success(status.toMap())
+            }
+            "restartVpn" -> {
+                restartVpn(result)
+            }
             else -> result.notImplemented()
+        }
+    }
+
+    private fun restartVpn(result: MethodChannel.Result) {
+        val packages = AppBlockerVpnService.loadBlockedPackages(this)
+        if (packages.isEmpty()) {
+            result.success(null)
+            return
+        }
+
+        val permissionIntent = VpnService.prepare(this)
+        if (permissionIntent != null) {
+            if (pendingVpnStart != null) {
+                result.error("vpn_permission_pending", "A VPN permission request is already open.", null)
+                return
+            }
+            pendingVpnStart = PendingVpnStart(packages, result)
+            startActivityForResult(permissionIntent, VPN_PERMISSION_REQUEST_CODE)
+            return
+        }
+
+        try {
+            startVpnService(packages, AppBlockerVpnService.ACTION_RESTART)
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("vpn_restart_error", "Failed to restart VPN service: ${e.message}", null)
         }
     }
 
@@ -213,6 +290,8 @@ class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val TRAFFIC_CHANNEL = "com.app.net_guard/traffic"
         private const val LEGACY_TRAFFIC_CHANNEL = "com.example.blocker/traffic"
+        private const val VPN_STATUS_CHANNEL = "com.app.net_guard/vpn_status"
+        private const val LEGACY_VPN_STATUS_CHANNEL = "com.example.blocker/vpn_status"
         private const val VPN_PERMISSION_REQUEST_CODE = 4142
     }
 }
