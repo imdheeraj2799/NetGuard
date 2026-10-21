@@ -34,6 +34,21 @@ class AppInfoModel extends AppInfoEntity {
     iconPath: entity.iconPath,
   );
 
+  @override
+  AppInfoModel copyWith({
+    String? appName,
+    String? packageName,
+    bool? isBlocked,
+    Uint8List? iconBytes,
+    String? iconPath,
+  }) => AppInfoModel(
+    appName: appName ?? this.appName,
+    packageName: packageName ?? this.packageName,
+    isBlocked: isBlocked ?? this.isBlocked,
+    iconBytes: iconBytes ?? this.iconBytes,
+    iconPath: iconPath ?? this.iconPath,
+  );
+
   Map<String, dynamic> toMap() => {
     'appName': appName,
     'packageName': packageName,
