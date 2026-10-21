@@ -5,4 +5,8 @@
     <string name="vpn_notification_channel_description">Keeps selected applications offline.</string>
     <string name="vpn_notification_title">App blocking is active</string>
     <string name="vpn_notification_text">Network blocked for %1$d app(s)</string>
+    <string name="vpn_notification_restarting_title">Firewall is restarting</string>
+    <string name="vpn_notification_restarting_text">Restoring internet blocking protection...</string>
+    <string name="vpn_notification_inactive_title">Internet blocking is inactive</string>
+    <string name="vpn_notification_inactive_text">Tap to restore protection for %1$d app(s)</string>
 </resources>
