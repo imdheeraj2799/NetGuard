@@ -18,6 +18,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
        _toggleBlockStatus = toggleBlockStatus,
        super(const AppBlockerInitial()) {
     on<LoadInstalledAppsEvent>(_onLoadInstalledApps);
+    on<LoadMoreAppsEvent>(_onLoadMoreApps);
     on<ToggleAppBlockEvent>(_onToggleAppBlock);
     on<ToggleAppInternetAccessEvent>(_onToggleAppInternetAccess);
     on<SearchAppEvent>(_onSearchApp);
@@ -37,6 +38,28 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     result.fold(
       (failure) => emit(AppBlockerError(failure.message)),
       (apps) => emit(_loadedState(originalApps: apps)),
+    );
+  }
+
+  void _onLoadMoreApps(
+    LoadMoreAppsEvent event,
+    Emitter<AppBlockerState> emit,
+  ) {
+    final currentState = state;
+    if (currentState is! AppBlockerLoaded) return;
+    if (currentState.hasReachedMax || currentState.isLoadingMore) return;
+
+    final nextPage = currentState.page + 1;
+    final nextDisplayed = List<AppInfoEntity>.unmodifiable(
+      currentState.filteredApps.take(nextPage * currentState.pageSize),
+    );
+
+    emit(
+      currentState.copyWith(
+        page: nextPage,
+        displayedApps: nextDisplayed,
+        hasReachedMax: nextDisplayed.length >= currentState.filteredApps.length,
+      ),
     );
   }
 
@@ -60,6 +83,8 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
         originalApps: optimisticallyUpdated,
         searchQuery: currentState.searchQuery,
         filter: currentState.filter,
+        page: currentState.page,
+        pageSize: currentState.pageSize,
       ),
     );
 
@@ -129,16 +154,29 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     required List<AppInfoEntity> originalApps,
     String searchQuery = '',
     AppBlockerFilter filter = AppBlockerFilter.all,
+    int page = 1,
+    int pageSize = 15,
     String? actionErrorMessage,
-  }) => AppBlockerLoaded(
-    originalApps: List.unmodifiable(originalApps),
-    filteredApps: List.unmodifiable(
+  }) {
+    final filtered = List<AppInfoEntity>.unmodifiable(
       originalApps.where((app) => _matches(app, searchQuery, filter)),
-    ),
-    searchQuery: searchQuery,
-    filter: filter,
-    actionErrorMessage: actionErrorMessage,
-  );
+    );
+    final displayed = List<AppInfoEntity>.unmodifiable(
+      filtered.take(page * pageSize),
+    );
+
+    return AppBlockerLoaded(
+      originalApps: List<AppInfoEntity>.unmodifiable(originalApps),
+      filteredApps: filtered,
+      displayedApps: displayed,
+      page: page,
+      pageSize: pageSize,
+      hasReachedMax: displayed.length >= filtered.length,
+      searchQuery: searchQuery,
+      filter: filter,
+      actionErrorMessage: actionErrorMessage,
+    );
+  }
 
   bool _matches(
     AppInfoEntity app,

@@ -1,3 +1,5 @@
+// ignore_for_file: prefer_initializing_formals
+
 import '../../domain/entities/app_info_entity.dart';
 import 'app_blocker_event.dart';
 
@@ -17,16 +19,33 @@ class AppBlockerLoaded extends AppBlockerState {
   const AppBlockerLoaded({
     required this.originalApps,
     required this.filteredApps,
+    List<AppInfoEntity> displayedApps = const <AppInfoEntity>[],
+    this.page = 1,
+    this.pageSize = 15,
+    this.hasReachedMax = false,
+    this.isLoadingMore = false,
     this.searchQuery = '',
     this.filter = AppBlockerFilter.all,
     this.actionErrorMessage,
-  });
+  }) : _displayedApps = displayedApps;
 
   final List<AppInfoEntity> originalApps;
   final List<AppInfoEntity> filteredApps;
+  final List<AppInfoEntity> _displayedApps;
+  final int page;
+  final int pageSize;
+  final bool hasReachedMax;
+  final bool isLoadingMore;
   final String searchQuery;
   final AppBlockerFilter filter;
   final String? actionErrorMessage;
+
+  List<AppInfoEntity> get displayedApps =>
+      _displayedApps.isEmpty && filteredApps.isNotEmpty
+          ? List<AppInfoEntity>.unmodifiable(
+              filteredApps.take(page * pageSize),
+            )
+          : _displayedApps;
 
   int get blockedAppsCount => originalApps.where((app) => app.isBlocked).length;
   int get allowedAppsCount => originalApps.where((app) => !app.isBlocked).length;
@@ -35,19 +54,43 @@ class AppBlockerLoaded extends AppBlockerState {
   AppBlockerLoaded copyWith({
     List<AppInfoEntity>? originalApps,
     List<AppInfoEntity>? filteredApps,
+    List<AppInfoEntity>? displayedApps,
+    int? page,
+    int? pageSize,
+    bool? hasReachedMax,
+    bool? isLoadingMore,
     String? searchQuery,
     AppBlockerFilter? filter,
     String? actionErrorMessage,
     bool clearActionErrorMessage = false,
-  }) => AppBlockerLoaded(
-    originalApps: originalApps ?? this.originalApps,
-    filteredApps: filteredApps ?? this.filteredApps,
-    searchQuery: searchQuery ?? this.searchQuery,
-    filter: filter ?? this.filter,
-    actionErrorMessage: clearActionErrorMessage
-        ? null
-        : (actionErrorMessage ?? this.actionErrorMessage),
-  );
+  }) {
+    final updatedOriginal = originalApps ?? this.originalApps;
+    final updatedFiltered = filteredApps ?? this.filteredApps;
+    final updatedPage = page ?? this.page;
+    final updatedPageSize = pageSize ?? this.pageSize;
+    final updatedDisplayed = displayedApps ??
+        (filteredApps != null
+            ? List<AppInfoEntity>.unmodifiable(
+                updatedFiltered.take(updatedPage * updatedPageSize),
+              )
+            : this.displayedApps);
+
+    return AppBlockerLoaded(
+      originalApps: updatedOriginal,
+      filteredApps: updatedFiltered,
+      displayedApps: updatedDisplayed,
+      page: updatedPage,
+      pageSize: updatedPageSize,
+      hasReachedMax: hasReachedMax ??
+          (updatedDisplayed.length >= updatedFiltered.length),
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      searchQuery: searchQuery ?? this.searchQuery,
+      filter: filter ?? this.filter,
+      actionErrorMessage: clearActionErrorMessage
+          ? null
+          : (actionErrorMessage ?? this.actionErrorMessage),
+    );
+  }
 }
 
 class AppBlockerError extends AppBlockerState {

@@ -87,3 +87,13 @@ class ClearErrorMessageEvent extends AppBlockerEvent {
   @override
   int get hashCode => runtimeType.hashCode;
 }
+
+class LoadMoreAppsEvent extends AppBlockerEvent {
+  const LoadMoreAppsEvent();
+
+  @override
+  bool operator ==(Object other) => other is LoadMoreAppsEvent;
+
+  @override
+  int get hashCode => runtimeType.hashCode;
+}
