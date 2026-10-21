@@ -2,6 +2,7 @@ import 'package:dartz/dartz.dart';
 
 import '../../../../core/error/failure.dart';
 import '../../domain/entities/app_info_entity.dart';
+import '../../domain/entities/vpn_status_entity.dart';
 import '../../domain/repositories/app_blocker_repository.dart';
 import '../datasources/app_local_data_source.dart';
 import '../datasources/installed_apps_data_source.dart';
@@ -175,6 +176,33 @@ class AppBlockerRepositoryImpl implements AppBlockerRepository {
       return Left(CacheFailure(error.message));
     } catch (error) {
       return Left(ServerFailure('Unable to get blocked packages: $error'));
+    }
+  }
+
+  @override
+  Future<Either<Failure, VpnStatusInfo>> getVpnStatus() async {
+    try {
+      final status = await _nativeDataSource.getVpnStatus();
+      return Right(status);
+    } on NativeDataSourceException catch (error) {
+      return Left(PlatformFailure(error.message));
+    } catch (error) {
+      return Left(ServerFailure('Unable to get VPN status: $error'));
+    }
+  }
+
+  @override
+  Stream<VpnStatusInfo> get vpnStatusStream => _nativeDataSource.vpnStatusStream;
+
+  @override
+  Future<Either<Failure, void>> restartVpn() async {
+    try {
+      await _nativeDataSource.restartVpn();
+      return const Right(null);
+    } on NativeDataSourceException catch (error) {
+      return Left(PlatformFailure(error.message));
+    } catch (error) {
+      return Left(ServerFailure('Unable to restart VPN service: $error'));
     }
   }
 }
