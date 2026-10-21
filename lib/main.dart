@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'core/di/injection_container.dart';
 import 'core/theme/app_theme.dart';
@@ -9,6 +10,7 @@ import 'features/app_blocker/presentation/pages/dashboard_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter();
   await initializeDependencies();
   runApp(const NetGuardApp());
 }
