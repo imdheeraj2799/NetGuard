@@ -17,10 +17,32 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (_isNearBottom) {
+      context.read<AppBlockerBloc>().add(const LoadMoreAppsEvent());
+    }
+  }
+
+  bool get _isNearBottom {
+    if (!_scrollController.hasClients) return false;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.offset;
+    return currentScroll >= (maxScroll - 200);
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -64,6 +86,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 );
               },
               child: CustomScrollView(
+                controller: _scrollController,
                 slivers: [
                   // App Bar / Header
                   SliverToBoxAdapter(
@@ -72,7 +95,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
                   // Search Bar
                   SliverToBoxAdapter(
-                    child: _buildSearchBar(context),
+                    child: _buildSearchBar(context, state),
                   ),
 
                   // Firewall Status Summary
@@ -169,7 +192,10 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildSearchBar(BuildContext context) {
+  Widget _buildSearchBar(BuildContext context, AppBlockerState state) {
+    final hasSearchQuery =
+        state is AppBlockerLoaded && state.searchQuery.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: TextField(
@@ -181,14 +207,23 @@ class _DashboardPageState extends State<DashboardPage> {
         decoration: InputDecoration(
           hintText: 'Search installed applications...',
           hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 14),
-          prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary, size: 20),
-          suffixIcon: _searchController.text.isNotEmpty
+          prefixIcon: const Icon(
+            Icons.search,
+            color: AppColors.textSecondary,
+            size: 20,
+          ),
+          suffixIcon: hasSearchQuery
               ? IconButton(
-                  icon: const Icon(Icons.clear, color: AppColors.textSecondary, size: 18),
+                  icon: const Icon(
+                    Icons.clear,
+                    color: AppColors.textSecondary,
+                    size: 18,
+                  ),
                   onPressed: () {
                     _searchController.clear();
-                    context.read<AppBlockerBloc>().add(const SearchAppEvent(''));
-                    setState(() {});
+                    context.read<AppBlockerBloc>().add(
+                      const SearchAppEvent(''),
+                    );
                   },
                 )
               : null,
@@ -345,9 +380,9 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     final loaded = state as AppBlockerLoaded;
-    final apps = loaded.filteredApps;
+    final apps = loaded.displayedApps;
 
-    if (apps.isEmpty) {
+    if (loaded.filteredApps.isEmpty) {
       return SliverFillRemaining(
         child: Center(
           child: Column(
@@ -374,11 +409,30 @@ class _DashboardPageState extends State<DashboardPage> {
       );
     }
 
+    final hasReachedMax = loaded.hasReachedMax;
+    final itemCount = hasReachedMax ? apps.length : apps.length + 1;
+
     return SliverPadding(
       padding: const EdgeInsets.only(bottom: 24, top: 4),
       sliver: SliverList(
         delegate: SliverChildBuilderDelegate(
           (context, index) {
+            if (index >= apps.length) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.accentBlue,
+                    ),
+                  ),
+                ),
+              );
+            }
+
             final app = apps[index];
             return AppCard(
               key: ValueKey(app.packageName),
@@ -393,7 +447,7 @@ class _DashboardPageState extends State<DashboardPage> {
               },
             );
           },
-          childCount: apps.length,
+          childCount: itemCount,
         ),
       ),
     );
