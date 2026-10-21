@@ -4,9 +4,13 @@ import 'package:mocktail/mocktail.dart';
 import 'package:net_guard/core/error/failure.dart';
 import 'package:net_guard/core/usecase/usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/entities/app_info_entity.dart';
+import 'package:net_guard/features/app_blocker/domain/entities/vpn_status_entity.dart';
 import 'package:net_guard/features/app_blocker/domain/repositories/app_blocker_repository.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/get_installed_apps_usecase.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/get_vpn_status_usecase.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/restart_vpn_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/toggle_block_status_usecase.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/watch_vpn_status_usecase.dart';
 
 class MockAppBlockerRepository extends Mock implements AppBlockerRepository {}
 
@@ -77,6 +81,64 @@ void main() {
       ).thenAnswer((_) async => const Left(failure));
 
       final result = await ToggleBlockStatusUseCase(repository)(params);
+
+      expect(result, const Left<Failure, void>(failure));
+    });
+  });
+
+  group('GetVpnStatusUseCase', () {
+    test('returns VpnStatusInfo from repository on success', () async {
+      const info = VpnStatusInfo(status: VpnStatus.active, blockedCount: 1);
+      when(() => repository.getVpnStatus())
+          .thenAnswer((_) async => const Right(info));
+
+      final result = await GetVpnStatusUseCase(repository)(const NoParams());
+
+      expect(result, const Right<Failure, VpnStatusInfo>(info));
+      verify(() => repository.getVpnStatus()).called(1);
+    });
+
+    test('returns repository failure when status query fails', () async {
+      const failure = PlatformFailure('Native error');
+      when(() => repository.getVpnStatus())
+          .thenAnswer((_) async => const Left(failure));
+
+      final result = await GetVpnStatusUseCase(repository)(const NoParams());
+
+      expect(result, const Left<Failure, VpnStatusInfo>(failure));
+    });
+  });
+
+  group('WatchVpnStatusUseCase', () {
+    test('returns stream of VpnStatusInfo from repository', () {
+      final stream = Stream.value(
+        const VpnStatusInfo(status: VpnStatus.active),
+      );
+      when(() => repository.vpnStatusStream).thenAnswer((_) => stream);
+
+      final result = WatchVpnStatusUseCase(repository)();
+
+      expect(result, stream);
+    });
+  });
+
+  group('RestartVpnUseCase', () {
+    test('delegates restart call to repository on success', () async {
+      when(() => repository.restartVpn())
+          .thenAnswer((_) async => const Right(null));
+
+      final result = await RestartVpnUseCase(repository)(const NoParams());
+
+      expect(result, const Right<Failure, void>(null));
+      verify(() => repository.restartVpn()).called(1);
+    });
+
+    test('returns failure when restart fails', () async {
+      const failure = PlatformFailure('Restart failed');
+      when(() => repository.restartVpn())
+          .thenAnswer((_) async => const Left(failure));
+
+      final result = await RestartVpnUseCase(repository)(const NoParams());
 
       expect(result, const Left<Failure, void>(failure));
     });

@@ -8,6 +8,7 @@ import 'package:net_guard/features/app_blocker/data/datasources/local_storage_da
 import 'package:net_guard/features/app_blocker/data/datasources/native_app_data_source.dart';
 import 'package:net_guard/features/app_blocker/data/models/app_info_model.dart';
 import 'package:net_guard/features/app_blocker/data/repositories/app_blocker_repository_impl.dart';
+import 'package:net_guard/features/app_blocker/domain/entities/vpn_status_entity.dart';
 
 class MockNativeAppDataSource extends Mock implements NativeAppDataSource {}
 
@@ -263,5 +264,61 @@ void main() {
         .thenThrow(const LocalStorageException('read failed'));
     final failure = await repository.getBlockedPackages();
     expect(failure.fold((value) => value, (_) => null), isA<CacheFailure>());
+  });
+
+  group('VPN Status & Recovery', () {
+    test('returns VPN status from native data source', () async {
+      const expectedInfo = VpnStatusInfo(
+        status: VpnStatus.active,
+        blockedCount: 2,
+      );
+      when(() => native.getVpnStatus()).thenAnswer((_) async => expectedInfo);
+
+      final result = await repository.getVpnStatus();
+
+      expect(result, const Right<Failure, VpnStatusInfo>(expectedInfo));
+    });
+
+    test('maps native exception to PlatformFailure on getVpnStatus', () async {
+      when(() => native.getVpnStatus())
+          .thenThrow(const NativeDataSourceException('Status error'));
+
+      final result = await repository.getVpnStatus();
+
+      expect(
+        result.fold((failure) => failure, (_) => null),
+        isA<PlatformFailure>(),
+      );
+    });
+
+    test('restarts VPN service through native data source', () async {
+      when(() => native.restartVpn()).thenAnswer((_) async {});
+
+      final result = await repository.restartVpn();
+
+      expect(result, const Right<Failure, void>(null));
+      verify(() => native.restartVpn()).called(1);
+    });
+
+    test('maps native exception to PlatformFailure on restartVpn', () async {
+      when(() => native.restartVpn())
+          .thenThrow(const NativeDataSourceException('Restart failed'));
+
+      final result = await repository.restartVpn();
+
+      expect(
+        result.fold((failure) => failure, (_) => null),
+        isA<PlatformFailure>(),
+      );
+    });
+
+    test('forwards vpnStatusStream from native data source', () {
+      final stream = Stream.value(
+        const VpnStatusInfo(status: VpnStatus.active),
+      );
+      when(() => native.vpnStatusStream).thenAnswer((_) => stream);
+
+      expect(repository.vpnStatusStream, stream);
+    });
   });
 }

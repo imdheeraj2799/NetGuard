@@ -176,4 +176,61 @@ void main() {
 
     verify(() => bloc.add(const LoadMoreAppsEvent())).called(1);
   });
+
+  testWidgets('renders active VPN status on dashboard', (tester) async {
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: testApps,
+        filteredApps: testApps,
+        vpnStatus: VpnStatus.active,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.text('VPN Status: '), findsOneWidget);
+    expect(find.text('Active'), findsOneWidget);
+    expect(find.text('Enforcing firewall'), findsOneWidget);
+    expect(find.text('1 Blocked'), findsOneWidget);
+  });
+
+  testWidgets('renders restarting VPN status and message', (tester) async {
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: testApps,
+        filteredApps: testApps,
+        vpnStatus: VpnStatus.restarting,
+        vpnStatusReason: 'Attempting restart (1/3)...',
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.text('Firewall Protection: Restarting'), findsOneWidget);
+    expect(find.text('Attempting restart (1/3)...'), findsOneWidget);
+    expect(find.text('Restarting'), findsOneWidget);
+  });
+
+  testWidgets('renders inactive alert banner with Restore Protection button when apps are blocked', (tester) async {
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: testApps,
+        filteredApps: testApps,
+        vpnStatus: VpnStatus.inactive,
+        vpnStatusReason: 'VPN permission revoked',
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.text('Firewall Protection: Inactive'), findsOneWidget);
+    expect(find.text('VPN permission revoked'), findsOneWidget);
+    expect(find.text('Inactive'), findsOneWidget); // Header badge shows Inactive, not Blocked!
+    expect(find.text('Restore Protection'), findsOneWidget);
+
+    await tester.tap(find.text('Restore Protection'));
+    await tester.pump();
+
+    verify(() => bloc.add(const RestartVpnEvent())).called(1);
+  });
 }

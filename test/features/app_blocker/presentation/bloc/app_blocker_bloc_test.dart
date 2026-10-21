@@ -7,6 +7,8 @@ import 'package:net_guard/core/usecase/usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/entities/app_info_entity.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/get_installed_apps_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/toggle_block_status_usecase.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/get_vpn_status_usecase.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/restart_vpn_usecase.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/app_blocker_bloc.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/app_blocker_event.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/app_blocker_state.dart';
@@ -16,6 +18,10 @@ class MockGetInstalledAppsUseCase extends Mock
 
 class MockToggleBlockStatusUseCase extends Mock
     implements ToggleBlockStatusUseCase {}
+
+class MockGetVpnStatusUseCase extends Mock implements GetVpnStatusUseCase {}
+
+class MockRestartVpnUseCase extends Mock implements RestartVpnUseCase {}
 
 class FakeToggleBlockStatusParams extends Fake
     implements ToggleBlockStatusParams {}
@@ -35,6 +41,8 @@ void main() {
   ];
   late MockGetInstalledAppsUseCase getInstalledApps;
   late MockToggleBlockStatusUseCase toggleBlockStatus;
+  late MockGetVpnStatusUseCase getVpnStatus;
+  late MockRestartVpnUseCase restartVpn;
 
   setUpAll(() {
     registerFallbackValue(FakeToggleBlockStatusParams());
@@ -43,11 +51,18 @@ void main() {
   setUp(() {
     getInstalledApps = MockGetInstalledAppsUseCase();
     toggleBlockStatus = MockToggleBlockStatusUseCase();
+    getVpnStatus = MockGetVpnStatusUseCase();
+    restartVpn = MockRestartVpnUseCase();
   });
 
-  AppBlockerBloc buildBloc() => AppBlockerBloc(
+  AppBlockerBloc buildBloc({
+    GetVpnStatusUseCase? customGetVpnStatus,
+    RestartVpnUseCase? customRestartVpn,
+  }) => AppBlockerBloc(
     getInstalledApps: getInstalledApps,
     toggleBlockStatus: toggleBlockStatus,
+    getVpnStatus: customGetVpnStatus,
+    restartVpn: customRestartVpn,
   );
 
   blocTest<AppBlockerBloc, AppBlockerState>(
@@ -210,6 +225,90 @@ void main() {
           .having((s) => s.displayedApps.length, 'displayedApps length', 20)
           .having((s) => s.page, 'page', 2)
           .having((s) => s.hasReachedMax, 'hasReachedMax', isTrue),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'VpnStatusUpdatedEvent updates vpnStatus and reason in AppBlockerLoaded',
+    build: () => buildBloc(),
+    seed: () => const AppBlockerLoaded(originalApps: apps, filteredApps: apps),
+    act: (bloc) => bloc.add(
+      const VpnStatusUpdatedEvent(
+        status: VpnStatus.inactive,
+        reason: 'VPN permission revoked',
+      ),
+    ),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.inactive)
+          .having((s) => s.vpnStatusReason, 'vpnStatusReason', 'VPN permission revoked')
+          .having((s) => s.isFirewallActive, 'isFirewallActive', isFalse),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'RestartVpnEvent emits restarting status and triggers restart usecase',
+    build: () {
+      when(() => restartVpn(const NoParams()))
+          .thenAnswer((_) async => const Right(null));
+      return buildBloc(customRestartVpn: restartVpn);
+    },
+    seed: () => const AppBlockerLoaded(
+      originalApps: apps,
+      filteredApps: apps,
+      vpnStatus: VpnStatus.inactive,
+      vpnStatusReason: 'Permission revoked',
+    ),
+    act: (bloc) => bloc.add(const RestartVpnEvent()),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.restarting)
+          .having((s) => s.vpnStatusReason, 'vpnStatusReason', 'Restarting firewall...'),
+    ],
+    verify: (_) {
+      verify(() => restartVpn(const NoParams())).called(1);
+    },
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'RestartVpnEvent failure updates state to inactive with error message',
+    build: () {
+      when(() => restartVpn(const NoParams()))
+          .thenAnswer((_) async => const Left(PlatformFailure('Permission denied')));
+      return buildBloc(customRestartVpn: restartVpn);
+    },
+    seed: () => const AppBlockerLoaded(
+      originalApps: apps,
+      filteredApps: apps,
+      vpnStatus: VpnStatus.inactive,
+    ),
+    act: (bloc) => bloc.add(const RestartVpnEvent()),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.restarting),
+      isA<AppBlockerLoaded>()
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.inactive)
+          .having((s) => s.vpnStatusReason, 'vpnStatusReason', 'Permission denied')
+          .having((s) => s.actionErrorMessage, 'actionErrorMessage', 'Failed to restart VPN: Permission denied'),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'CheckVpnStatusEvent queries getVpnStatus and updates loaded state',
+    build: () {
+      when(() => getVpnStatus(const NoParams())).thenAnswer(
+        (_) async => const Right(
+          VpnStatusInfo(status: VpnStatus.restarting, reason: 'Recovering...'),
+        ),
+      );
+      return buildBloc(customGetVpnStatus: getVpnStatus);
+    },
+    seed: () => const AppBlockerLoaded(originalApps: apps, filteredApps: apps),
+    act: (bloc) => bloc.add(const CheckVpnStatusEvent()),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.restarting)
+          .having((s) => s.vpnStatusReason, 'vpnStatusReason', 'Recovering...'),
     ],
   );
 }
