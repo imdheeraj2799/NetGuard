@@ -1,7 +1,10 @@
 // ignore_for_file: prefer_initializing_formals
 
 import '../../domain/entities/app_info_entity.dart';
+import '../../domain/entities/vpn_status_entity.dart';
 import 'app_blocker_event.dart';
+
+export '../../domain/entities/vpn_status_entity.dart' show VpnStatus, VpnStatusInfo;
 
 sealed class AppBlockerState {
   const AppBlockerState();
@@ -27,6 +30,8 @@ class AppBlockerLoaded extends AppBlockerState {
     this.searchQuery = '',
     this.filter = AppBlockerFilter.all,
     this.actionErrorMessage,
+    this.vpnStatus = VpnStatus.active,
+    this.vpnStatusReason,
   }) : _displayedApps = displayedApps;
 
   final List<AppInfoEntity> originalApps;
@@ -39,6 +44,8 @@ class AppBlockerLoaded extends AppBlockerState {
   final String searchQuery;
   final AppBlockerFilter filter;
   final String? actionErrorMessage;
+  final VpnStatus vpnStatus;
+  final String? vpnStatusReason;
 
   List<AppInfoEntity> get displayedApps =>
       _displayedApps.isEmpty && filteredApps.isNotEmpty
@@ -49,7 +56,8 @@ class AppBlockerLoaded extends AppBlockerState {
 
   int get blockedAppsCount => originalApps.where((app) => app.isBlocked).length;
   int get allowedAppsCount => originalApps.where((app) => !app.isBlocked).length;
-  bool get isFirewallActive => blockedAppsCount > 0;
+  bool get isFirewallActive =>
+      vpnStatus == VpnStatus.active && blockedAppsCount > 0;
 
   AppBlockerLoaded copyWith({
     List<AppInfoEntity>? originalApps,
@@ -63,6 +71,9 @@ class AppBlockerLoaded extends AppBlockerState {
     AppBlockerFilter? filter,
     String? actionErrorMessage,
     bool clearActionErrorMessage = false,
+    VpnStatus? vpnStatus,
+    String? vpnStatusReason,
+    bool clearVpnStatusReason = false,
   }) {
     final updatedOriginal = originalApps ?? this.originalApps;
     final updatedFiltered = filteredApps ?? this.filteredApps;
@@ -89,6 +100,10 @@ class AppBlockerLoaded extends AppBlockerState {
       actionErrorMessage: clearActionErrorMessage
           ? null
           : (actionErrorMessage ?? this.actionErrorMessage),
+      vpnStatus: vpnStatus ?? this.vpnStatus,
+      vpnStatusReason: clearVpnStatusReason
+          ? null
+          : (vpnStatusReason ?? this.vpnStatusReason),
     );
   }
 }

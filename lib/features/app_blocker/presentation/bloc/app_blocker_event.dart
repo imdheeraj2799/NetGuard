@@ -97,3 +97,46 @@ class LoadMoreAppsEvent extends AppBlockerEvent {
   @override
   int get hashCode => runtimeType.hashCode;
 }
+
+class CheckVpnStatusEvent extends AppBlockerEvent {
+  const CheckVpnStatusEvent();
+
+  @override
+  bool operator ==(Object other) => other is CheckVpnStatusEvent;
+
+  @override
+  int get hashCode => runtimeType.hashCode;
+}
+
+class VpnStatusUpdatedEvent extends AppBlockerEvent {
+  const VpnStatusUpdatedEvent({
+    required this.status,
+    this.reason,
+    this.blockedCount = 0,
+  });
+
+  final dynamic status; // VpnStatus
+  final String? reason;
+  final int blockedCount;
+
+  @override
+  bool operator ==(Object other) =>
+      other is VpnStatusUpdatedEvent &&
+      status == other.status &&
+      reason == other.reason &&
+      blockedCount == other.blockedCount;
+
+  @override
+  int get hashCode => Object.hash(status, reason, blockedCount);
+}
+
+class RestartVpnEvent extends AppBlockerEvent {
+  const RestartVpnEvent();
+
+  @override
+  bool operator ==(Object other) => other is RestartVpnEvent;
+
+  @override
+  int get hashCode => runtimeType.hashCode;
+}
+
