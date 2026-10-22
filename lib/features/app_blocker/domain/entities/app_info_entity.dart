@@ -7,6 +7,8 @@ class AppInfoEntity {
     required this.isBlocked,
     this.iconBytes,
     this.iconPath,
+    this.isSchedulePart = false,
+    this.whichSchedule,
   });
 
   final String appName;
@@ -14,6 +16,8 @@ class AppInfoEntity {
   final bool isBlocked;
   final Uint8List? iconBytes;
   final String? iconPath;
+  final bool isSchedulePart;
+  final String? whichSchedule;
 
   bool get isInternetAllowed => !isBlocked;
 
@@ -23,12 +27,17 @@ class AppInfoEntity {
     bool? isBlocked,
     Uint8List? iconBytes,
     String? iconPath,
+    bool? isSchedulePart,
+    String? whichSchedule,
+    bool clearWhichSchedule = false,
   }) => AppInfoEntity(
     appName: appName ?? this.appName,
     packageName: packageName ?? this.packageName,
     isBlocked: isBlocked ?? this.isBlocked,
     iconBytes: iconBytes ?? this.iconBytes,
     iconPath: iconPath ?? this.iconPath,
+    isSchedulePart: isSchedulePart ?? this.isSchedulePart,
+    whichSchedule: clearWhichSchedule ? null : (whichSchedule ?? this.whichSchedule),
   );
 
   @override
@@ -37,8 +46,17 @@ class AppInfoEntity {
       appName == other.appName &&
       packageName == other.packageName &&
       isBlocked == other.isBlocked &&
-      iconPath == other.iconPath;
+      iconPath == other.iconPath &&
+      isSchedulePart == other.isSchedulePart &&
+      whichSchedule == other.whichSchedule;
 
   @override
-  int get hashCode => Object.hash(appName, packageName, isBlocked, iconPath);
+  int get hashCode => Object.hash(
+        appName,
+        packageName,
+        isBlocked,
+        iconPath,
+        isSchedulePart,
+        whichSchedule,
+      );
 }
