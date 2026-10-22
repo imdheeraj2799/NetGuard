@@ -57,12 +57,22 @@ class AppBlockerVpnService : VpnService() {
         when (action) {
             ACTION_STOP -> {
                 cancelPendingRetry()
-                try {
-                    startForeground(NOTIFICATION_ID, createNotification(0, VpnState.INACTIVE))
-                } catch (_: Exception) {
-                }
+                currentBlockedPackages = emptySet()
+                saveBlockedPackages(this, emptySet())
+                unregisterNetworkCallback()
                 stopVpn()
-                VpnStatusMonitor.update(VpnState.INACTIVE, 0, "Firewall stopped.")
+                isServiceRunning = false
+                isVpnEstablished = false
+                VpnStatusMonitor.update(VpnState.INACTIVE, 0, null)
+                // Use stopForeground instead of startForeground to avoid
+                // ForegroundServiceStartNotAllowedException on Android 14 when
+                // no VPN session is active.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -87,11 +97,16 @@ class AppBlockerVpnService : VpnService() {
 
         if (blockedPackages.isEmpty()) {
             cancelPendingRetry()
+            currentBlockedPackages = emptySet()
+            saveBlockedPackages(this, emptySet())
+            unregisterNetworkCallback()
             try {
                 startForeground(NOTIFICATION_ID, createNotification(0, VpnState.INACTIVE))
             } catch (_: Exception) {
             }
             stopVpn()
+            isServiceRunning = false
+            isVpnEstablished = false
             VpnStatusMonitor.update(VpnState.INACTIVE, 0, null)
             stopSelf()
             return
@@ -133,10 +148,13 @@ class AppBlockerVpnService : VpnService() {
         stopVpn()
         isServiceRunning = false
         isVpnEstablished = false
+        currentBlockedPackages = emptySet()
+        val remainingCount = loadBlockedPackages(this).size
+        val reason = if (remainingCount > 0) "VPN service stopped." else null
         VpnStatusMonitor.update(
             VpnState.INACTIVE,
-            currentBlockedPackages.size,
-            "VPN service stopped.",
+            remainingCount,
+            reason,
         )
         packetExecutor.shutdownNow()
         super.onDestroy()
@@ -206,13 +224,15 @@ class AppBlockerVpnService : VpnService() {
     }
 
     private fun ensureVpnActive() {
-        val packages = if (currentBlockedPackages.isNotEmpty()) {
-            currentBlockedPackages
-        } else {
-            loadBlockedPackages(this)
+        if (!isServiceRunning) return
+        val packages = loadBlockedPackages(this)
+        if (packages.isEmpty()) {
+            currentBlockedPackages = emptySet()
+            return
         }
+        currentBlockedPackages = packages
 
-        if (packages.isNotEmpty() && (vpnInterface == null || !isDraining)) {
+        if (vpnInterface == null || !isDraining) {
             Log.i(TAG, "Ensuring VPN tunnel active after network event...")
             configureVpn(packages)
         }
@@ -379,6 +399,7 @@ class AppBlockerVpnService : VpnService() {
     private fun stopVpn() {
         isDraining = false
         isVpnEstablished = false
+        currentBlockedPackages = emptySet()
         drainFuture?.cancel(true)
         drainFuture = null
         try {

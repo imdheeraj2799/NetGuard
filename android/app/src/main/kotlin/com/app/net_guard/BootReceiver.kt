@@ -15,35 +15,11 @@ class BootReceiver : BroadcastReceiver() {
             action == Intent.ACTION_MY_PACKAGE_REPLACED
         ) {
             Log.d(TAG, "Boot or package update broadcast received: $action")
-            val blockedPackages = AppBlockerVpnService.loadBlockedPackages(context)
-            if (blockedPackages.isNotEmpty()) {
-                val permissionRevoked = VpnService.prepare(context) != null
-                if (!permissionRevoked) {
-                    Log.i(TAG, "Restoring VPN service on boot for ${blockedPackages.size} blocked package(s)")
-                    val vpnIntent = Intent(context, AppBlockerVpnService::class.java).apply {
-                        this.action = AppBlockerVpnService.ACTION_START
-                        putStringArrayListExtra(
-                            AppBlockerVpnService.EXTRA_BLOCKED_PACKAGES,
-                            ArrayList(blockedPackages),
-                        )
-                    }
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(vpnIntent)
-                        } else {
-                            context.startService(vpnIntent)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to restore VPN on boot: ${e.message}")
-                    }
-                } else {
-                    Log.w(TAG, "VPN permission revoked; cannot auto-start on boot")
-                    VpnStatusMonitor.update(
-                        VpnState.INACTIVE,
-                        blockedPackages.size,
-                        "VPN permission required to restore protection after reboot.",
-                    )
-                }
+            try {
+                // Reconcile manual and scheduled firewall rules, and arm upcoming transition alarms
+                ScheduleAlarmManager.reconcileAndApply(context)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to reconcile schedules on boot: ${e.message}")
             }
         }
     }
