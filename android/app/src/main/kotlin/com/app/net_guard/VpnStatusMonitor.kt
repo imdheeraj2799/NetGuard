@@ -40,10 +40,14 @@ object VpnStatusMonitor {
 
     @Synchronized
     fun update(state: VpnState, blockedCount: Int, reason: String? = null) {
-        currentState = state
-        currentBlockedCount = blockedCount
-        currentReason = reason
-        val data = VpnStatusData(state, blockedCount, reason)
+        val resolvedState = if (blockedCount <= 0) VpnState.INACTIVE else state
+        val resolvedReason = if (blockedCount <= 0) null else reason
+        val resolvedCount = if (blockedCount <= 0) 0 else blockedCount
+
+        currentState = resolvedState
+        currentBlockedCount = resolvedCount
+        currentReason = resolvedReason
+        val data = VpnStatusData(resolvedState, resolvedCount, resolvedReason)
         val copy = listeners.toList()
         copy.forEach { it.invoke(data) }
     }
@@ -60,9 +64,20 @@ object VpnStatusMonitor {
     }
 
     fun getCurrentStatus(context: Context): VpnStatusData {
+        val blockedPackages = AppBlockerVpnService.loadBlockedPackages(context)
+        if (blockedPackages.isEmpty()) {
+            currentState = VpnState.INACTIVE
+            currentBlockedCount = 0
+            currentReason = null
+            return VpnStatusData(
+                state = VpnState.INACTIVE,
+                blockedCount = 0,
+                reason = null,
+            )
+        }
+
         val isServiceRunning = AppBlockerVpnService.isServiceRunning
         val isEstablished = AppBlockerVpnService.isVpnEstablished
-        val blockedPackages = AppBlockerVpnService.loadBlockedPackages(context)
         val isPermissionRevoked = VpnService.prepare(context) != null
 
         val resolvedState = when {
@@ -72,9 +87,8 @@ object VpnStatusMonitor {
         }
 
         val resolvedReason = when {
-            isPermissionRevoked && blockedPackages.isNotEmpty() ->
-                "VPN permission revoked. Tap to restore protection."
-            resolvedState == VpnState.INACTIVE && blockedPackages.isNotEmpty() && !isServiceRunning ->
+            isPermissionRevoked -> "VPN permission revoked. Tap to restore protection."
+            resolvedState == VpnState.INACTIVE && !isServiceRunning ->
                 currentReason ?: "Firewall is inactive. Tap to restore protection."
             resolvedState == VpnState.RESTARTING ->
                 currentReason ?: "Restarting firewall..."
