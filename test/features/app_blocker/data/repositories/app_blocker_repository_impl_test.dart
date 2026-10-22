@@ -128,16 +128,16 @@ void main() {
       );
       when(() => storage.getBlockedPackages()).thenAnswer((_) async => ['mail']);
       when(() => storage.setBlockedPackages(any())).thenAnswer((_) async {});
-      when(() => native.stopVpnService()).thenAnswer((_) async {});
+      when(() => native.updateBlockedList(any())).thenAnswer((_) async {});
 
       final result = await repository.getInstalledApps();
 
       expect(result, isA<Right<Failure, List<dynamic>>>());
       // Verify uninstalled app was removed from Hive cache
       verify(() => localDataSource.deleteApps(['mail'])).called(1);
-      // Verify blocked list updated and VPN stopped since no blocked apps remain
+      // Verify blocked list updated and VPN updated since no blocked apps remain
       verify(() => storage.setBlockedPackages([])).called(1);
-      verify(() => native.stopVpnService()).called(1);
+      verify(() => native.updateBlockedList([])).called(1);
     });
 
     test('detects newly installed applications and adds them to local storage', () async {
@@ -239,9 +239,9 @@ void main() {
     verifyNever(() => storage.setBlockedPackages(any()));
   });
 
-  test('stops VPN when the last blocked app is unblocked', () async {
+  test('updates blocked list via native updateBlockedList when the last blocked app is unblocked', () async {
     when(() => storage.getBlockedPackages()).thenAnswer((_) async => ['mail']);
-    when(() => native.stopVpnService()).thenAnswer((_) async {});
+    when(() => native.updateBlockedList(any())).thenAnswer((_) async {});
     when(() => storage.setBlockedPackages(any())).thenAnswer((_) async {});
 
     final result = await repository.toggleBlockStatus(
@@ -250,8 +250,8 @@ void main() {
     );
 
     expect(result, const Right<Failure, void>(null));
-    verify(() => native.stopVpnService()).called(1);
-    verifyNever(() => native.updateBlockedList(any()));
+    verify(() => native.updateBlockedList([])).called(1);
+    verifyNever(() => native.stopVpnService());
     verify(() => storage.setBlockedPackages([])).called(1);
   });
 

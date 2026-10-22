@@ -311,4 +311,268 @@ void main() {
           .having((s) => s.vpnStatusReason, 'vpnStatusReason', 'Recovering...'),
     ],
   );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'ToggleAppBlockEvent sets vpnStatus to inactive when unblocking the last blocked app',
+    build: () {
+      when(() => toggleBlockStatus(any()))
+          .thenAnswer((_) async => const Right(null));
+      return buildBloc();
+    },
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+        AppInfoEntity(appName: 'Maps', packageName: 'com.example.maps', isBlocked: true),
+      ],
+      filteredApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+        AppInfoEntity(appName: 'Maps', packageName: 'com.example.maps', isBlocked: true),
+      ],
+      vpnStatus: VpnStatus.active,
+    ),
+    act: (bloc) => bloc.add(
+      const ToggleAppBlockEvent(
+        packageName: 'com.example.maps',
+        isBlocked: false,
+      ),
+    ),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.blockedAppsCount, 'blockedAppsCount', 0)
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.inactive),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'ToggleAppBlockEvent sets vpnStatus to active when blocking the first app from inactive',
+    build: () {
+      when(() => toggleBlockStatus(any()))
+          .thenAnswer((_) async => const Right(null));
+      return buildBloc();
+    },
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      filteredApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      vpnStatus: VpnStatus.inactive,
+    ),
+    act: (bloc) => bloc.add(
+      const ToggleAppBlockEvent(
+        packageName: 'com.example.mail',
+        isBlocked: true,
+      ),
+    ),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.blockedAppsCount, 'blockedAppsCount', 1)
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.active),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'LoadInstalledAppsEvent initializes vpnStatus as inactive when no apps are blocked',
+    build: () {
+      when(() => getInstalledApps(const NoParams())).thenAnswer(
+        (_) async => const Right([
+          AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+        ]),
+      );
+      return buildBloc();
+    },
+    act: (bloc) => bloc.add(const LoadInstalledAppsEvent()),
+    expect: () => [
+      isA<AppBlockerLoading>(),
+      isA<AppBlockerLoaded>()
+          .having((s) => s.blockedAppsCount, 'blockedAppsCount', 0)
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.inactive),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'VpnStatusUpdatedEvent forces inactive status when blockedAppsCount is 0',
+    build: buildBloc,
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      filteredApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      vpnStatus: VpnStatus.inactive,
+    ),
+    act: (bloc) => bloc.add(
+      const VpnStatusUpdatedEvent(
+        status: VpnStatus.active,
+        blockedCount: 0,
+      ),
+    ),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.blockedAppsCount, 'blockedAppsCount', 0)
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.inactive),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'CheckVpnStatusEvent forces inactive status when blockedAppsCount is 0 and blockedCount is 0',
+    build: () {
+      when(() => getVpnStatus(const NoParams())).thenAnswer(
+        (_) async => const Right(VpnStatusInfo(status: VpnStatus.active, blockedCount: 0)),
+      );
+      return buildBloc(customGetVpnStatus: getVpnStatus);
+    },
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      filteredApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      vpnStatus: VpnStatus.active,
+    ),
+    act: (bloc) => bloc.add(const CheckVpnStatusEvent()),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.blockedAppsCount, 'blockedAppsCount', 0)
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.inactive),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'CheckVpnStatusEvent preserves active status and updates activeBlockedCount when native blockedCount > 0',
+    build: () {
+      when(() => getVpnStatus(const NoParams())).thenAnswer(
+        (_) async => const Right(
+          VpnStatusInfo(status: VpnStatus.active, blockedCount: 2),
+        ),
+      );
+      return buildBloc(customGetVpnStatus: getVpnStatus);
+    },
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      filteredApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      vpnStatus: VpnStatus.inactive,
+    ),
+    act: (bloc) => bloc.add(const CheckVpnStatusEvent()),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.blockedAppsCount, 'blockedAppsCount', 0)
+          .having((s) => s.activeBlockedCount, 'activeBlockedCount', 2)
+          .having((s) => s.effectiveBlockedCount, 'effectiveBlockedCount', 2)
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.active),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'VpnStatusUpdatedEvent preserves active status and updates activeBlockedCount when blockedCount > 0',
+    build: buildBloc,
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      filteredApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+      ],
+      vpnStatus: VpnStatus.inactive,
+    ),
+    act: (bloc) => bloc.add(
+      const VpnStatusUpdatedEvent(
+        status: VpnStatus.active,
+        blockedCount: 3,
+      ),
+    ),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having((s) => s.blockedAppsCount, 'blockedAppsCount', 0)
+          .having((s) => s.activeBlockedCount, 'activeBlockedCount', 3)
+          .having((s) => s.effectiveBlockedCount, 'effectiveBlockedCount', 3)
+          .having((s) => s.vpnStatus, 'vpnStatus', VpnStatus.active),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'SyncScheduleRestrictionsEvent updates schedule restrictions on loaded apps',
+    build: buildBloc,
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+        AppInfoEntity(appName: 'Browser', packageName: 'com.example.browser', isBlocked: false),
+      ],
+      filteredApps: [
+        AppInfoEntity(appName: 'Mail', packageName: 'com.example.mail', isBlocked: false),
+        AppInfoEntity(appName: 'Browser', packageName: 'com.example.browser', isBlocked: false),
+      ],
+    ),
+    act: (bloc) => bloc.add(
+      const SyncScheduleRestrictionsEvent({
+        'com.example.mail': 'Work Schedule',
+      }),
+    ),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having(
+            (s) => s.originalApps.firstWhere((a) => a.packageName == 'com.example.mail').isSchedulePart,
+            'isSchedulePart',
+            isTrue,
+          )
+          .having(
+            (s) => s.originalApps.firstWhere((a) => a.packageName == 'com.example.mail').whichSchedule,
+            'whichSchedule',
+            'Work Schedule',
+          )
+          .having(
+            (s) => s.originalApps.firstWhere((a) => a.packageName == 'com.example.browser').isSchedulePart,
+            'isSchedulePart for browser',
+            isFalse,
+          ),
+    ],
+  );
+
+  blocTest<AppBlockerBloc, AppBlockerState>(
+    'SyncScheduleRestrictionsEvent clears schedule restrictions when schedule is removed',
+    build: buildBloc,
+    seed: () => const AppBlockerLoaded(
+      originalApps: [
+        AppInfoEntity(
+          appName: 'Mail',
+          packageName: 'com.example.mail',
+          isBlocked: false,
+          isSchedulePart: true,
+          whichSchedule: 'Work Schedule',
+        ),
+      ],
+      filteredApps: [
+        AppInfoEntity(
+          appName: 'Mail',
+          packageName: 'com.example.mail',
+          isBlocked: false,
+          isSchedulePart: true,
+          whichSchedule: 'Work Schedule',
+        ),
+      ],
+    ),
+    act: (bloc) => bloc.add(
+      const SyncScheduleRestrictionsEvent({}),
+    ),
+    expect: () => [
+      isA<AppBlockerLoaded>()
+          .having(
+            (s) => s.originalApps.first.isSchedulePart,
+            'isSchedulePart',
+            isFalse,
+          )
+          .having(
+            (s) => s.originalApps.first.whichSchedule,
+            'whichSchedule',
+            isNull,
+          ),
+    ],
+  );
 }

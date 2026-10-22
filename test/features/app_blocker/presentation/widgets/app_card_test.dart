@@ -92,4 +92,49 @@ void main() {
 
     expect(find.byIcon(Icons.android_rounded), findsOneWidget);
   });
+
+  testWidgets('renders schedule badge and invokes onRestrictedTap instead of onInternetAccessChanged when app is part of schedule', (tester) async {
+    const scheduledApp = AppInfoEntity(
+      appName: 'YouTube',
+      packageName: 'com.google.android.youtube',
+      isBlocked: true,
+      isSchedulePart: true,
+      whichSchedule: 'Night Study',
+    );
+
+    bool toggled = false;
+    int restrictedTaps = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppCard(
+            app: scheduledApp,
+            onInternetAccessChanged: (_) => toggled = true,
+            onRestrictedTap: () => restrictedTaps++,
+          ),
+        ),
+      ),
+    );
+
+    // Verify scheduled badge is visible
+    expect(find.text('Night Study'), findsOneWidget);
+    expect(find.byIcon(Icons.schedule_rounded), findsOneWidget);
+
+    // Tapping the switch must NOT toggle internet access, but call onRestrictedTap
+    final switchFinder = find.byKey(const Key('app_card_toggle_com.google.android.youtube'));
+    expect(switchFinder, findsOneWidget);
+    await tester.tap(switchFinder);
+    await tester.pump();
+
+    expect(toggled, isFalse);
+    expect(restrictedTaps, 1);
+
+    // Tapping the card body also calls onRestrictedTap
+    await tester.tap(find.text('YouTube'));
+    await tester.pump();
+
+    expect(toggled, isFalse);
+    expect(restrictedTaps, 2);
+  });
 }

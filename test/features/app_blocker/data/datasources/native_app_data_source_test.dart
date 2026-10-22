@@ -112,4 +112,85 @@ void main() {
       throwsA(isA<NativeDataSourceException>()),
     );
   });
+
+  test('syncSchedules passes json to native channel', () async {
+    String? captured;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'syncSchedules') {
+            captured = (call.arguments as Map)['schedules'] as String;
+          }
+          return null;
+        });
+
+    await dataSource.syncSchedules('{"test": 1}');
+    expect(captured, '{"test": 1}');
+  });
+
+  test('syncSchedules converts platform error to NativeDataSourceException', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (_) async =>
+              throw PlatformException(code: 'error', message: 'Sync error'),
+        );
+
+    expect(
+      dataSource.syncSchedules('[]'),
+      throwsA(isA<NativeDataSourceException>()),
+    );
+  });
+
+  test('canScheduleExactAlarms returns boolean from channel', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'canScheduleExactAlarms') {
+            return false;
+          }
+          return null;
+        });
+
+    final result = await dataSource.canScheduleExactAlarms();
+    expect(result, isFalse);
+  });
+
+  test('canScheduleExactAlarms returns true on PlatformException', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (_) async =>
+              throw PlatformException(code: 'error', message: 'Not supported'),
+        );
+
+    final result = await dataSource.canScheduleExactAlarms();
+    expect(result, isTrue);
+  });
+
+  test('requestExactAlarmPermission returns boolean from channel', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'requestExactAlarmPermission') {
+            return true;
+          }
+          return null;
+        });
+
+    final result = await dataSource.requestExactAlarmPermission();
+    expect(result, isTrue);
+  });
+
+  test('requestExactAlarmPermission converts error to NativeDataSourceException', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (_) async =>
+              throw PlatformException(code: 'error', message: 'Permission error'),
+        );
+
+    expect(
+      dataSource.requestExactAlarmPermission(),
+      throwsA(isA<NativeDataSourceException>()),
+    );
+  });
 }
+

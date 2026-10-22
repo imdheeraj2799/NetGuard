@@ -4,17 +4,29 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:net_guard/features/app_blocker/domain/entities/app_info_entity.dart';
+import 'package:net_guard/features/app_blocker/domain/entities/block_schedule_entity.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/app_blocker_bloc.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/app_blocker_event.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/app_blocker_state.dart';
 import 'package:net_guard/features/app_blocker/presentation/pages/dashboard_page.dart';
+import 'package:net_guard/features/app_blocker/presentation/bloc/schedule_bloc.dart';
+import 'package:net_guard/features/app_blocker/presentation/bloc/schedule_event.dart';
+import 'package:net_guard/features/app_blocker/presentation/bloc/schedule_state.dart';
 import 'package:net_guard/features/app_blocker/presentation/widgets/app_card.dart';
 
 class MockAppBlockerBloc extends MockBloc<AppBlockerEvent, AppBlockerState>
     implements AppBlockerBloc {}
 
+class MockScheduleBloc extends MockBloc<ScheduleEvent, ScheduleState>
+    implements ScheduleBloc {}
+
 void main() {
+  setUpAll(() {
+    registerFallbackValue(const LoadInstalledAppsEvent());
+  });
+
   late MockAppBlockerBloc bloc;
+  late MockScheduleBloc scheduleBloc;
 
   const testApps = [
     AppInfoEntity(
@@ -31,12 +43,17 @@ void main() {
 
   setUp(() {
     bloc = MockAppBlockerBloc();
+    scheduleBloc = MockScheduleBloc();
+    when(() => scheduleBloc.state).thenReturn(const ScheduleInitial());
   });
 
   Widget buildTestWidget() {
     return MaterialApp(
-      home: BlocProvider<AppBlockerBloc>.value(
-        value: bloc,
+      home: MultiBlocProvider(
+        providers: [
+          BlocProvider<AppBlockerBloc>.value(value: bloc),
+          BlocProvider<ScheduleBloc>.value(value: scheduleBloc),
+        ],
         child: const DashboardPage(),
       ),
     );
@@ -232,5 +249,198 @@ void main() {
     await tester.pump();
 
     verify(() => bloc.add(const RestartVpnEvent())).called(1);
+  });
+
+  testWidgets('does not show upper status loader or restarting card when all apps are unrestricted', (tester) async {
+    const unblockedApps = [
+      AppInfoEntity(
+        appName: 'Web Browser',
+        packageName: 'com.browser.app',
+        isBlocked: false,
+      ),
+      AppInfoEntity(
+        appName: 'Social Chat',
+        packageName: 'com.social.app',
+        isBlocked: false,
+      ),
+    ];
+
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: unblockedApps,
+        filteredApps: unblockedApps,
+        vpnStatus: VpnStatus.restarting,
+        hasReachedMax: true,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    // Should not show restarting firewall banner or loader
+    expect(find.text('Firewall Protection: Restarting'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('VPN Status: '), findsOneWidget);
+    expect(find.text('Inactive'), findsOneWidget);
+    expect(find.text('Idle'), findsOneWidget);
+    expect(find.text('Active'), findsNothing);
+  });
+
+  testWidgets('renders VPN Status: Inactive when all apps are unblocked even if vpnStatus is active', (tester) async {
+    const unblockedApps = [
+      AppInfoEntity(
+        appName: 'Web Browser',
+        packageName: 'com.browser.app',
+        isBlocked: false,
+      ),
+    ];
+
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: unblockedApps,
+        filteredApps: unblockedApps,
+        vpnStatus: VpnStatus.active,
+        hasReachedMax: true,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.text('VPN Status: '), findsOneWidget);
+    expect(find.text('Inactive'), findsOneWidget);
+    expect(find.text('Idle'), findsOneWidget);
+    expect(find.text('Active'), findsNothing);
+    expect(find.text('All Allowed'), findsOneWidget);
+  });
+
+  testWidgets('shows schedule-armed subtitle when VPN inactive but enabled schedules exist', (tester) async {
+    final testSchedule = BlockScheduleEntity(
+      id: 's-1',
+      name: 'Work',
+      packageNames: const ['com.social.app'],
+      recurrence: ScheduleRecurrence.weekdays,
+      startHour: 9,
+      startMinute: 0,
+      endHour: 17,
+      endMinute: 0,
+      isEnabled: true,
+      createdAt: DateTime(2026, 10, 21),
+      updatedAt: DateTime(2026, 10, 21),
+    );
+
+    const unblockedApps = [
+      AppInfoEntity(
+        appName: 'Web Browser',
+        packageName: 'com.browser.app',
+        isBlocked: false,
+      ),
+      AppInfoEntity(
+        appName: 'Social Chat',
+        packageName: 'com.social.app',
+        isBlocked: false,
+      ),
+    ];
+
+    when(() => scheduleBloc.state).thenReturn(
+      ScheduleLoaded(schedules: [testSchedule]),
+    );
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: unblockedApps,
+        filteredApps: unblockedApps,
+        vpnStatus: VpnStatus.inactive,
+        hasReachedMax: true,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    // VPN should still show as Inactive (not Active)
+    expect(find.text('VPN Status: '), findsOneWidget);
+    expect(find.text('Inactive'), findsOneWidget);
+
+    // Subtitle must reflect that 1 schedule is armed
+    expect(find.text('1 Schedule Armed'), findsOneWidget);
+
+    // Must NOT say 'Idle' or 'Enforcing firewall'
+    expect(find.text('Idle'), findsNothing);
+    expect(find.text('Enforcing firewall'), findsNothing);
+    expect(find.text('Active'), findsNothing);
+  });
+
+  testWidgets('renders Add Schedule (+) button on dashboard', (tester) async {
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: testApps,
+        filteredApps: testApps,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.byKey(const Key('add_schedule_button')), findsOneWidget);
+    expect(find.text('Add Schedule (+)'), findsOneWidget);
+    expect(find.byKey(const Key('header_schedules_button')), findsOneWidget);
+  });
+
+  testWidgets('displays compact dialogue when tapping scheduled app card or toggle and does not toggle block status', (tester) async {
+    const scheduledApp = AppInfoEntity(
+      appName: 'Scheduled Streamer',
+      packageName: 'com.scheduled.streamer',
+      isBlocked: true,
+      isSchedulePart: true,
+      whichSchedule: 'Night Restrict',
+    );
+
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: [scheduledApp],
+        filteredApps: [scheduledApp],
+        hasReachedMax: true,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.text('Scheduled Streamer'), findsOneWidget);
+    expect(find.text('Night Restrict'), findsOneWidget);
+
+    // Tap the switch
+    final switchFinder = find.byKey(const Key('app_card_toggle_com.scheduled.streamer'));
+    await tester.tap(switchFinder);
+    await tester.pumpAndSettle();
+
+    // Verify dialog appears with exact required text
+    expect(
+      find.text("This application is part of a schedule, so you can't enable or disable it manually."),
+      findsOneWidget,
+    );
+    expect(find.text('Schedule Restricted'), findsOneWidget);
+    expect(find.text('Assigned to: Night Restrict'), findsOneWidget);
+
+    // Verify dialog has only OK button and no Cancel button
+    expect(find.text('OK'), findsOneWidget);
+    expect(find.text('Cancel'), findsNothing);
+
+    // Tap OK to close dialog
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    // Dialog is dismissed
+    expect(
+      find.text("This application is part of a schedule, so you can't enable or disable it manually."),
+      findsNothing,
+    );
+
+    // Now tap the card itself
+    await tester.tap(find.text('Scheduled Streamer'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text("This application is part of a schedule, so you can't enable or disable it manually."),
+      findsOneWidget,
+    );
+
+    // Ensure ToggleAppBlockEvent was never called
+    verifyNever(() => bloc.add(any(that: isA<ToggleAppBlockEvent>())));
   });
 }
