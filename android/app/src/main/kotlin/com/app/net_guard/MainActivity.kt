@@ -1,8 +1,10 @@
 package com.app.net_guard
 
 import android.content.Intent
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -30,19 +32,35 @@ class MainActivity : FlutterFragmentActivity() {
             LEGACY_TRAFFIC_CHANNEL,
         ).setMethodCallHandler(trafficHandler)
 
-        val statusStreamHandler = object : EventChannel.StreamHandler {
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            VPN_STATUS_CHANNEL,
+        ).setStreamHandler(createStatusStreamHandler())
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            LEGACY_VPN_STATUS_CHANNEL,
+        ).setStreamHandler(createStatusStreamHandler())
+    }
+
+    private fun createStatusStreamHandler(): EventChannel.StreamHandler {
+        return object : EventChannel.StreamHandler {
+            private var sink: EventChannel.EventSink? = null
             private var monitorListener: ((VpnStatusData) -> Unit)? = null
 
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                if (events == null) return
-                vpnStatusListeners.add(events)
+                val s = events ?: return
+                sink = s
+                synchronized(vpnStatusListeners) {
+                    vpnStatusListeners.add(s)
+                }
                 val current = VpnStatusMonitor.getCurrentStatus(this@MainActivity)
-                events.success(current.toMap())
+                s.success(current.toMap())
 
                 val listener: (VpnStatusData) -> Unit = { data ->
                     runOnUiThread {
                         try {
-                            events.success(data.toMap())
+                            sink?.success(data.toMap())
                         } catch (_: Exception) {}
                     }
                 }
@@ -53,18 +71,14 @@ class MainActivity : FlutterFragmentActivity() {
             override fun onCancel(arguments: Any?) {
                 monitorListener?.let { VpnStatusMonitor.removeListener(it) }
                 monitorListener = null
+                sink?.let { s ->
+                    synchronized(vpnStatusListeners) {
+                        vpnStatusListeners.remove(s)
+                    }
+                }
+                sink = null
             }
         }
-
-        EventChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            VPN_STATUS_CHANNEL,
-        ).setStreamHandler(statusStreamHandler)
-
-        EventChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            LEGACY_VPN_STATUS_CHANNEL,
-        ).setStreamHandler(statusStreamHandler)
     }
 
     override fun onDestroy() {
@@ -144,6 +158,40 @@ class MainActivity : FlutterFragmentActivity() {
             "restartVpn" -> {
                 restartVpn(result)
             }
+            "syncSchedules" -> {
+                val json = when (val arg = call.arguments) {
+                    is String -> arg
+                    is Map<*, *> -> arg["schedules"] as? String
+                    else -> null
+                }
+                if (!json.isNullOrBlank()) {
+                    NativeScheduleStore.saveSchedulesJson(this, json)
+                }
+                try {
+                    ScheduleAlarmManager.reconcileAndApply(this)
+                    result.success(null)
+                } catch (e: Exception) {
+                    result.error("schedule_sync_error", "Failed to sync schedules: ${e.message}", null)
+                }
+            }
+            "canScheduleExactAlarms" -> {
+                result.success(ScheduleAlarmManager.canScheduleExactAlarms(this))
+            }
+            "requestExactAlarmPermission" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    try {
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("permission_error", "Failed to open exact alarm settings: ${e.message}", null)
+                    }
+                } else {
+                    result.success(true)
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -201,17 +249,13 @@ class MainActivity : FlutterFragmentActivity() {
         packages: Set<String>,
         result: MethodChannel.Result,
     ) {
-        if (packages.isEmpty()) {
-            stopVpnService()
+        NativeScheduleStore.saveManualBlockedPackages(this, packages)
+        try {
+            ScheduleAlarmManager.reconcileAndApply(this)
             result.success(null)
-            return
+        } catch (e: Exception) {
+            result.error("vpn_update_error", "Failed to update blocked list: ${e.message}", null)
         }
-        if (VpnService.prepare(this) != null) {
-            requestVpnStart(packages, result)
-            return
-        }
-        startVpnService(packages, AppBlockerVpnService.ACTION_UPDATE)
-        result.success(null)
     }
 
     private fun toggleSinglePackage(call: MethodCall, result: MethodChannel.Result) {
@@ -221,14 +265,14 @@ class MainActivity : FlutterFragmentActivity() {
             result.error("invalid_arguments", "packageName and isBlocked are required.", null)
             return
         }
-        val updatedPackages = AppBlockerVpnService.loadBlockedPackages(this).toMutableSet()
-        if (isBlocked) updatedPackages.add(packageName) else updatedPackages.remove(packageName)
-
-        if (updatedPackages.isEmpty()) {
-            stopVpnService()
+        val currentManual = NativeScheduleStore.loadManualBlockedPackages(this).toMutableSet()
+        if (isBlocked) currentManual.add(packageName) else currentManual.remove(packageName)
+        NativeScheduleStore.saveManualBlockedPackages(this, currentManual)
+        try {
+            ScheduleAlarmManager.reconcileAndApply(this)
             result.success(null)
-        } else {
-            requestVpnStart(updatedPackages, result)
+        } catch (e: Exception) {
+            result.error("vpn_update_error", "Failed to toggle package: ${e.message}", null)
         }
     }
 
@@ -251,24 +295,25 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun stopVpnService() {
+        // NOTE: Do NOT wipe NativeScheduleStore.manualBlockedPackages here.
+        // updateBlockedList already persists the correct manual packages when the user
+        // manually unblocks all apps. Wiping here would corrupt the manual rules when
+        // stopVpnService is called from schedule sync code.
         AppBlockerVpnService.saveBlockedPackages(this, emptySet())
-        val intent = Intent(this, AppBlockerVpnService::class.java).apply {
-            action = AppBlockerVpnService.ACTION_STOP
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
+        VpnStatusMonitor.update(VpnState.INACTIVE, 0, null)
+        if (AppBlockerVpnService.isServiceRunning) {
+            val intent = Intent(this, AppBlockerVpnService::class.java).apply {
+                action = AppBlockerVpnService.ACTION_STOP
             }
-        } catch (_: Exception) {
             try {
+                // ACTION_STOP does not require foreground service start — use startService.
                 startService(intent)
             } catch (_: Exception) {}
+        } else {
+            try {
+                stopService(Intent(this, AppBlockerVpnService::class.java))
+            } catch (_: Exception) {}
         }
-        try {
-            stopService(Intent(this, AppBlockerVpnService::class.java))
-        } catch (_: Exception) {}
     }
 
     private fun blockedPackages(call: MethodCall): Set<String> =
