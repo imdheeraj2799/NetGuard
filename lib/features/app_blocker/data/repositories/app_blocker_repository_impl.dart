@@ -90,11 +90,7 @@ class AppBlockerRepositoryImpl implements AppBlockerRepository {
       if (hadBlockedUninstalled) {
         currentBlocked.removeAll(uninstalledPackageNames);
         await _localStorageDataSource.setBlockedPackages(currentBlocked.toList(growable: false));
-        if (currentBlocked.isEmpty) {
-          await _nativeDataSource.stopVpnService();
-        } else {
-          await _nativeDataSource.updateBlockedList(currentBlocked.toList(growable: false));
-        }
+        await _nativeDataSource.updateBlockedList(currentBlocked.toList(growable: false));
       }
     }
 
@@ -140,13 +136,9 @@ class AppBlockerRepositoryImpl implements AppBlockerRepository {
       final current = await _localStorageDataSource.getBlockedPackages();
       final updated = current.toSet();
       isBlocked ? updated.add(packageName) : updated.remove(packageName);
-      if (updated.isEmpty) {
-        await _nativeDataSource.stopVpnService();
-      } else {
-        await _nativeDataSource.updateBlockedList(
-          updated.toList(growable: false),
-        );
-      }
+      await _nativeDataSource.updateBlockedList(
+        updated.toList(growable: false),
+      );
       await _localStorageDataSource.setBlockedPackages(updated.toList(growable: false));
 
       // Also persist updated block status to local Hive storage

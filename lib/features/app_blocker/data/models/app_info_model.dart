@@ -9,6 +9,8 @@ class AppInfoModel extends AppInfoEntity {
     required super.isBlocked,
     super.iconBytes,
     super.iconPath,
+    super.isSchedulePart = false,
+    super.whichSchedule,
   });
 
   factory AppInfoModel.fromMap(Map<dynamic, dynamic> map) {
@@ -23,6 +25,8 @@ class AppInfoModel extends AppInfoEntity {
           ? Uint8List.fromList(rawIcon.cast<int>())
           : null,
       iconPath: map['iconPath'] as String?,
+      isSchedulePart: map['isSchedulePart'] as bool? ?? false,
+      whichSchedule: map['whichSchedule'] as String?,
     );
   }
 
@@ -32,6 +36,8 @@ class AppInfoModel extends AppInfoEntity {
     isBlocked: entity.isBlocked,
     iconBytes: entity.iconBytes,
     iconPath: entity.iconPath,
+    isSchedulePart: entity.isSchedulePart,
+    whichSchedule: entity.whichSchedule,
   );
 
   @override
@@ -41,12 +47,19 @@ class AppInfoModel extends AppInfoEntity {
     bool? isBlocked,
     Uint8List? iconBytes,
     String? iconPath,
+    bool? isSchedulePart,
+    String? whichSchedule,
+    bool clearWhichSchedule = false,
   }) => AppInfoModel(
     appName: appName ?? this.appName,
     packageName: packageName ?? this.packageName,
     isBlocked: isBlocked ?? this.isBlocked,
     iconBytes: iconBytes ?? this.iconBytes,
     iconPath: iconPath ?? this.iconPath,
+    isSchedulePart: isSchedulePart ?? this.isSchedulePart,
+    whichSchedule: clearWhichSchedule
+        ? null
+        : (whichSchedule ?? this.whichSchedule),
   );
 
   Map<String, dynamic> toMap() => {
@@ -55,6 +68,8 @@ class AppInfoModel extends AppInfoEntity {
     'isBlocked': isBlocked,
     if (iconBytes != null) 'iconBytes': iconBytes!.toList(),
     if (iconPath != null) 'iconPath': iconPath,
+    'isSchedulePart': isSchedulePart,
+    if (whichSchedule != null) 'whichSchedule': whichSchedule,
   };
 
   AppInfoEntity toEntity() => AppInfoEntity(
@@ -63,5 +78,7 @@ class AppInfoModel extends AppInfoEntity {
     isBlocked: isBlocked,
     iconBytes: iconBytes,
     iconPath: iconPath,
+    isSchedulePart: isSchedulePart,
+    whichSchedule: whichSchedule,
   );
 }

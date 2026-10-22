@@ -8,6 +8,9 @@ abstract class NativeAppDataSource {
   Future<VpnStatusInfo> getVpnStatus();
   Stream<VpnStatusInfo> get vpnStatusStream;
   Future<void> restartVpn();
+  Future<void> syncSchedules(String schedulesJson);
+  Future<bool> canScheduleExactAlarms();
+  Future<bool> requestExactAlarmPermission();
 }
 
 class NativeAppDataSourceImpl implements NativeAppDataSource {
@@ -83,6 +86,41 @@ class NativeAppDataSourceImpl implements NativeAppDataSource {
     } on PlatformException catch (error) {
       throw NativeDataSourceException(
         error.message ?? 'Unable to restart VPN service',
+      );
+    }
+  }
+
+  @override
+  Future<void> syncSchedules(String schedulesJson) async {
+    try {
+      await _channel.invokeMethod<void>('syncSchedules', {
+        'schedules': schedulesJson,
+      });
+    } on PlatformException catch (error) {
+      throw NativeDataSourceException(
+        error.message ?? 'Unable to sync schedules to background service',
+      );
+    }
+  }
+
+  @override
+  Future<bool> canScheduleExactAlarms() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('canScheduleExactAlarms');
+      return result ?? true;
+    } on PlatformException {
+      return true;
+    }
+  }
+
+  @override
+  Future<bool> requestExactAlarmPermission() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('requestExactAlarmPermission');
+      return result ?? true;
+    } on PlatformException catch (error) {
+      throw NativeDataSourceException(
+        error.message ?? 'Unable to request exact alarm permission',
       );
     }
   }
