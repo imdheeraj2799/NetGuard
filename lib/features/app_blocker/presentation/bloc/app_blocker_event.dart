@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 sealed class AppBlockerEvent {
   const AppBlockerEvent();
 }
@@ -138,5 +140,19 @@ class RestartVpnEvent extends AppBlockerEvent {
 
   @override
   int get hashCode => runtimeType.hashCode;
+}
+
+class SyncScheduleRestrictionsEvent extends AppBlockerEvent {
+  const SyncScheduleRestrictionsEvent(this.assignedPackages);
+
+  final Map<String, String> assignedPackages;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SyncScheduleRestrictionsEvent &&
+      mapEquals(assignedPackages, other.assignedPackages);
+
+  @override
+  int get hashCode => assignedPackages.hashCode;
 }
 

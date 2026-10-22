@@ -38,6 +38,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     on<CheckVpnStatusEvent>(_onCheckVpnStatus);
     on<VpnStatusUpdatedEvent>(_onVpnStatusUpdated);
     on<RestartVpnEvent>(_onRestartVpn);
+    on<SyncScheduleRestrictionsEvent>(_onSyncScheduleRestrictions);
 
     _initVpnStatusSubscription();
   }
@@ -49,6 +50,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
   final RestartVpnUseCase? _restartVpn;
 
   StreamSubscription<VpnStatusInfo>? _vpnStatusSubscription;
+  Map<String, String>? _pendingAssignedPackages;
 
   void _initVpnStatusSubscription() {
     if (_watchVpnStatus != null) {
@@ -78,28 +80,45 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     emit(const AppBlockerLoading());
     final result = await _getInstalledApps(const NoParams());
 
-    VpnStatus initialVpnStatus = VpnStatus.active;
-    String? initialVpnReason;
-    if (_getVpnStatus != null) {
-      final vpnResult = await _getVpnStatus(const NoParams());
-      vpnResult.fold(
-        (_) {},
-        (info) {
-          initialVpnStatus = info.status;
-          initialVpnReason = info.reason;
-        },
-      );
-    }
+    await result.fold(
+      (failure) async => emit(AppBlockerError(failure.message)),
+      (apps) async {
+        apps = _applyScheduleRestrictions(apps, _pendingAssignedPackages);
+        final hasBlocked = apps.any((app) => app.isBlocked);
+        VpnStatus initialVpnStatus =
+            hasBlocked ? VpnStatus.active : VpnStatus.inactive;
+        String? initialVpnReason;
+        int? activeBlockedCount;
 
-    result.fold(
-      (failure) => emit(AppBlockerError(failure.message)),
-      (apps) => emit(
-        _loadedState(
-          originalApps: apps,
-          vpnStatus: initialVpnStatus,
-          vpnStatusReason: initialVpnReason,
-        ),
-      ),
+        if (_getVpnStatus != null) {
+          final vpnResult = await _getVpnStatus(const NoParams());
+          vpnResult.fold(
+            (_) {},
+            (info) {
+              if (info.blockedCount > 0) {
+                activeBlockedCount = info.blockedCount;
+                initialVpnStatus = info.status;
+                initialVpnReason = info.reason;
+              } else if (hasBlocked) {
+                initialVpnStatus = info.status;
+                initialVpnReason = info.reason;
+              } else {
+                initialVpnStatus = VpnStatus.inactive;
+                initialVpnReason = null;
+              }
+            },
+          );
+        }
+
+        emit(
+          _loadedState(
+            originalApps: apps,
+            vpnStatus: initialVpnStatus,
+            vpnStatusReason: initialVpnReason,
+            activeBlockedCount: activeBlockedCount,
+          ),
+        );
+      },
     );
   }
 
@@ -140,6 +159,14 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
         )
         .toList(growable: false);
 
+    final willHaveBlockedApps =
+        optimisticallyUpdated.any((app) => app.isBlocked);
+    final optimisticVpnStatus = !willHaveBlockedApps
+        ? VpnStatus.inactive
+        : VpnStatus.active;
+    final optimisticReason =
+        !willHaveBlockedApps ? null : (currentState.vpnStatus == VpnStatus.restarting ? null : currentState.vpnStatusReason);
+
     emit(
       _loadedState(
         originalApps: optimisticallyUpdated,
@@ -147,8 +174,8 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
         filter: currentState.filter,
         page: currentState.page,
         pageSize: currentState.pageSize,
-        vpnStatus: currentState.vpnStatus,
-        vpnStatusReason: currentState.vpnStatusReason,
+        vpnStatus: optimisticVpnStatus,
+        vpnStatusReason: optimisticReason,
       ),
     );
 
@@ -159,9 +186,57 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
       ),
     );
 
-    result.fold(
-      (failure) => emit(AppBlockerError(failure.message)),
-      (_) {},
+    await result.fold(
+      (failure) async => emit(AppBlockerError(failure.message)),
+      (_) async {
+        final currentS = state;
+        if (currentS is! AppBlockerLoaded) return;
+
+        if (currentS.blockedAppsCount == 0 &&
+            (currentS.activeBlockedCount == null || currentS.activeBlockedCount == 0)) {
+          if (currentS.vpnStatus != VpnStatus.inactive || currentS.vpnStatusReason != null) {
+            emit(currentS.copyWith(
+              vpnStatus: VpnStatus.inactive,
+              clearVpnStatusReason: true,
+              clearActiveBlockedCount: true,
+            ));
+          }
+          return;
+        }
+
+        if (_getVpnStatus != null) {
+          final vpnResult = await _getVpnStatus(const NoParams());
+          vpnResult.fold(
+            (_) {},
+            (info) {
+              final s = state;
+              if (s is AppBlockerLoaded) {
+                final totalBlocked = info.blockedCount > 0
+                    ? info.blockedCount
+                    : s.blockedAppsCount;
+                final effectiveStatus = (info.status == VpnStatus.active && totalBlocked == 0)
+                    ? VpnStatus.inactive
+                    : info.status;
+                final effectiveReason = (totalBlocked == 0 && info.status != VpnStatus.restarting)
+                    ? null
+                    : info.reason;
+
+                if (s.vpnStatus != effectiveStatus ||
+                    s.vpnStatusReason != effectiveReason ||
+                    s.activeBlockedCount != totalBlocked) {
+                  emit(s.copyWith(
+                    vpnStatus: effectiveStatus,
+                    vpnStatusReason: effectiveReason,
+                    activeBlockedCount: totalBlocked > 0 ? totalBlocked : null,
+                    clearActiveBlockedCount: totalBlocked == 0,
+                    clearVpnStatusReason: totalBlocked == 0 && info.status != VpnStatus.restarting,
+                  ));
+                }
+              }
+            },
+          );
+        }
+      },
     );
   }
 
@@ -188,6 +263,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
         filter: currentState.filter,
         vpnStatus: currentState.vpnStatus,
         vpnStatusReason: currentState.vpnStatusReason,
+        activeBlockedCount: currentState.activeBlockedCount,
       ),
     );
   }
@@ -205,6 +281,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
         filter: event.filter,
         vpnStatus: currentState.vpnStatus,
         vpnStatusReason: currentState.vpnStatusReason,
+        activeBlockedCount: currentState.activeBlockedCount,
       ),
     );
   }
@@ -229,9 +306,22 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
       (info) {
         final currentState = state;
         if (currentState is AppBlockerLoaded) {
+          final totalBlocked = info.blockedCount > 0
+              ? info.blockedCount
+              : currentState.blockedAppsCount;
+          final effectiveStatus = (info.status == VpnStatus.active && totalBlocked == 0)
+              ? VpnStatus.inactive
+              : info.status;
+          final effectiveReason = (totalBlocked == 0 && info.status != VpnStatus.restarting)
+              ? null
+              : info.reason;
+
           emit(currentState.copyWith(
-            vpnStatus: info.status,
-            vpnStatusReason: info.reason,
+            vpnStatus: effectiveStatus,
+            vpnStatusReason: effectiveReason,
+            activeBlockedCount: totalBlocked > 0 ? totalBlocked : null,
+            clearActiveBlockedCount: totalBlocked == 0,
+            clearVpnStatusReason: totalBlocked == 0 && info.status != VpnStatus.restarting,
           ));
         }
       },
@@ -249,9 +339,23 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
         ? event.status as VpnStatus
         : VpnStatus.fromString(event.status?.toString());
 
+    final totalBlocked = event.blockedCount > 0
+        ? event.blockedCount
+        : currentState.blockedAppsCount;
+
+    final effectiveStatus = (status == VpnStatus.active && totalBlocked == 0)
+        ? VpnStatus.inactive
+        : status;
+    final effectiveReason = (totalBlocked == 0 && status != VpnStatus.restarting)
+        ? null
+        : event.reason;
+
     emit(currentState.copyWith(
-      vpnStatus: status,
-      vpnStatusReason: event.reason,
+      vpnStatus: effectiveStatus,
+      vpnStatusReason: effectiveReason,
+      activeBlockedCount: totalBlocked > 0 ? totalBlocked : null,
+      clearActiveBlockedCount: totalBlocked == 0,
+      clearVpnStatusReason: totalBlocked == 0 && status != VpnStatus.restarting,
     ));
   }
 
@@ -286,6 +390,53 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     }
   }
 
+  void _onSyncScheduleRestrictions(
+    SyncScheduleRestrictionsEvent event,
+    Emitter<AppBlockerState> emit,
+  ) {
+    _pendingAssignedPackages = event.assignedPackages;
+    final currentState = state;
+    if (currentState is! AppBlockerLoaded) return;
+
+    final updatedOriginal = _applyScheduleRestrictions(
+      currentState.originalApps,
+      event.assignedPackages,
+    );
+
+    emit(
+      _loadedState(
+        originalApps: updatedOriginal,
+        searchQuery: currentState.searchQuery,
+        filter: currentState.filter,
+        page: currentState.page,
+        pageSize: currentState.pageSize,
+        actionErrorMessage: currentState.actionErrorMessage,
+        vpnStatus: currentState.vpnStatus,
+        vpnStatusReason: currentState.vpnStatusReason,
+        activeBlockedCount: currentState.activeBlockedCount,
+      ),
+    );
+  }
+
+  List<AppInfoEntity> _applyScheduleRestrictions(
+    List<AppInfoEntity> apps,
+    Map<String, String>? assignedPackages,
+  ) {
+    if (assignedPackages == null) return apps;
+    return apps.map((app) {
+      final scheduleName = assignedPackages[app.packageName];
+      final isPart = scheduleName != null;
+      if (app.isSchedulePart != isPart || app.whichSchedule != scheduleName) {
+        return app.copyWith(
+          isSchedulePart: isPart,
+          whichSchedule: scheduleName,
+          clearWhichSchedule: !isPart,
+        );
+      }
+      return app;
+    }).toList(growable: false);
+  }
+
   AppBlockerLoaded _loadedState({
     required List<AppInfoEntity> originalApps,
     String searchQuery = '',
@@ -295,6 +446,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
     String? actionErrorMessage,
     VpnStatus vpnStatus = VpnStatus.active,
     String? vpnStatusReason,
+    int? activeBlockedCount,
   }) {
     final filtered = List<AppInfoEntity>.unmodifiable(
       originalApps.where((app) => _matches(app, searchQuery, filter)),
@@ -315,6 +467,7 @@ class AppBlockerBloc extends Bloc<AppBlockerEvent, AppBlockerState> {
       actionErrorMessage: actionErrorMessage,
       vpnStatus: vpnStatus,
       vpnStatusReason: vpnStatusReason,
+      activeBlockedCount: activeBlockedCount,
     );
   }
 
