@@ -7,26 +7,31 @@ class AppCard extends StatelessWidget {
   const AppCard({
     required this.app,
     required this.onInternetAccessChanged,
+    this.onRestrictedTap,
     super.key,
   });
 
   final AppInfoEntity app;
   final ValueChanged<bool> onInternetAccessChanged;
+  final VoidCallback? onRestrictedTap;
 
   @override
   Widget build(BuildContext context) {
     final isAllowed = app.isInternetAllowed;
+    final isScheduled = app.isSchedulePart == true && app.whichSchedule != null;
 
-    return Container(
+    final cardContent = Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.cardBackground,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isAllowed
-              ? AppColors.cardBorderSubtle
-              : const Color(0xFF452222),
+          color: isScheduled
+              ? const Color(0xFF1E3A5F)
+              : (isAllowed
+                  ? AppColors.cardBorderSubtle
+                  : const Color(0xFF452222)),
           width: 1,
         ),
       ),
@@ -42,15 +47,58 @@ class AppCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  app.appName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        app.appName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (isScheduled) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E293B),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: const Color(0xFF0284C7),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.schedule_rounded,
+                              size: 10,
+                              color: Color(0xFF38BDF8),
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              app.whichSchedule ?? 'Scheduled',
+                              style: const TextStyle(
+                                color: Color(0xFF38BDF8),
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 3),
                 Row(
@@ -86,18 +134,45 @@ class AppCard extends StatelessWidget {
           Semantics(
             label: 'Internet access for ${app.appName}',
             toggled: isAllowed,
-            child: Switch.adaptive(
-              value: isAllowed,
-              activeThumbColor: Colors.white,
-              activeTrackColor: AppColors.activeGreen,
-              inactiveThumbColor: AppColors.textSecondary,
-              inactiveTrackColor: AppColors.switchTrackInactive,
-              onChanged: onInternetAccessChanged,
-            ),
+            child: isScheduled
+                ? GestureDetector(
+                    key: Key('app_card_toggle_${app.packageName}'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onRestrictedTap,
+                    child: IgnorePointer(
+                      child: Switch.adaptive(
+                        value: isAllowed,
+                        activeThumbColor: Colors.white,
+                        activeTrackColor: AppColors.activeGreen,
+                        inactiveThumbColor: AppColors.textSecondary,
+                        inactiveTrackColor: AppColors.switchTrackInactive,
+                        onChanged: null,
+                      ),
+                    ),
+                  )
+                : Switch.adaptive(
+                    key: Key('app_card_toggle_${app.packageName}'),
+                    value: isAllowed,
+                    activeThumbColor: Colors.white,
+                    activeTrackColor: AppColors.activeGreen,
+                    inactiveThumbColor: AppColors.textSecondary,
+                    inactiveTrackColor: AppColors.switchTrackInactive,
+                    onChanged: onInternetAccessChanged,
+                  ),
           ),
         ],
       ),
     );
+
+    if (isScheduled && onRestrictedTap != null) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onRestrictedTap,
+        child: cardContent,
+      );
+    }
+
+    return cardContent;
   }
 
   Widget _buildAppIcon() {

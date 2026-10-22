@@ -3,10 +3,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/widgets/app_snackbar.dart';
+import '../../domain/entities/app_info_entity.dart';
 import '../bloc/app_blocker_bloc.dart';
 import '../bloc/app_blocker_event.dart';
 import '../bloc/app_blocker_state.dart';
+import '../bloc/schedule_bloc.dart';
+import '../bloc/schedule_event.dart';
+import '../bloc/schedule_state.dart';
 import '../widgets/app_card.dart';
+import 'schedule_list_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -15,14 +21,22 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      context.read<AppBlockerBloc>().add(const CheckVpnStatusEvent());
+    }
   }
 
   void _onScroll() {
@@ -40,90 +54,155 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
   }
 
+  Future<void> _navigateToSchedules() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const ScheduleListPage(),
+      ),
+    );
+    if (mounted) {
+      context.read<AppBlockerBloc>().add(const CheckVpnStatusEvent());
+      final schedState = context.read<ScheduleBloc>().state;
+      if (schedState is ScheduleLoaded) {
+        context.read<AppBlockerBloc>().add(
+              SyncScheduleRestrictionsEvent(schedState.assignedPackages),
+            );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      floatingActionButton: FloatingActionButton.extended(
+        key: const Key('add_schedule_button'),
+        backgroundColor: AppColors.buttonPrimaryBackground,
+        foregroundColor: AppColors.buttonPrimaryText,
+        icon: const Icon(Icons.add_alarm_rounded),
+        label: const Text(
+          'Add Schedule (+)',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        onPressed: _navigateToSchedules,
+      ),
       body: SafeArea(
         bottom: false,
-        child: BlocConsumer<AppBlockerBloc, AppBlockerState>(
-          listener: (context, state) {
-            if (state is AppBlockerError) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(state.message),
-                  backgroundColor: const Color(0xFF991B1B),
-                  behavior: SnackBarBehavior.floating,
-                  action: SnackBarAction(
-                    label: 'Retry',
-                    textColor: Colors.white,
-                    onPressed: () {
+        child: MultiBlocListener(
+          listeners: [
+            BlocListener<ScheduleBloc, ScheduleState>(
+              listener: (context, state) {
+                if (state is ScheduleLoaded) {
+                  context.read<AppBlockerBloc>().add(const CheckVpnStatusEvent());
+                  context.read<AppBlockerBloc>().add(
+                        SyncScheduleRestrictionsEvent(state.assignedPackages),
+                      );
+                }
+              },
+            ),
+            BlocListener<AppBlockerBloc, AppBlockerState>(
+              listener: (context, state) {
+                if (state is AppBlockerLoaded) {
+                  final schedState = context.read<ScheduleBloc>().state;
+                  if (schedState is ScheduleLoaded) {
+                    final assigned = schedState.assignedPackages;
+                    final needsSync = state.originalApps.any((app) {
+                      final sched = assigned[app.packageName];
+                      return app.isSchedulePart != (sched != null) ||
+                          app.whichSchedule != sched;
+                    });
+                    if (needsSync) {
+                      context.read<AppBlockerBloc>().add(
+                            SyncScheduleRestrictionsEvent(assigned),
+                          );
+                    }
+                  }
+                }
+                if (state is AppBlockerError) {
+                  AppSnackBar.showError(
+                    context,
+                    state.message,
+                    action: SnackBarAction(
+                      label: 'Retry',
+                      textColor: AppColors.accentBlue,
+                      onPressed: () {
+                        context.read<AppBlockerBloc>().add(
+                          const LoadInstalledAppsEvent(),
+                        );
+                      },
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+          child: BlocBuilder<ScheduleBloc, ScheduleState>(
+            builder: (context, schedState) {
+              return BlocBuilder<AppBlockerBloc, AppBlockerState>(
+                builder: (context, state) {
+                  return RefreshIndicator(
+                    color: Colors.white,
+                    backgroundColor: AppColors.cardBackground,
+                    onRefresh: () async {
+                      context.read<ScheduleBloc>().add(
+                        const LoadSchedulesEvent(),
+                      );
                       context.read<AppBlockerBloc>().add(
                         const LoadInstalledAppsEvent(),
                       );
+                      await context.read<AppBlockerBloc>().stream.firstWhere(
+                        (s) => s is! AppBlockerLoading,
+                      );
                     },
-                  ),
-                ),
+                    child: CustomScrollView(
+                      controller: _scrollController,
+                      slivers: [
+                        // App Bar / Header
+                        SliverToBoxAdapter(
+                          child: _buildHeader(context, state, schedState),
+                        ),
+
+                        // VPN Service Status & Alert Banner
+                        if (state is AppBlockerLoaded)
+                          SliverToBoxAdapter(
+                            child: _buildVpnStatusCard(context, state, schedState),
+                          ),
+
+                        // Search Bar
+                        SliverToBoxAdapter(
+                          child: _buildSearchBar(context, state),
+                        ),
+
+                        // Firewall Status Summary
+                        if (state is AppBlockerLoaded)
+                          SliverToBoxAdapter(
+                            child: _buildStatusSummary(state),
+                          ),
+
+                        // Main Content List / Loading / Error States
+                        _buildContent(context, state),
+                      ],
+                    ),
+                  );
+                },
               );
-            }
-          },
-          builder: (context, state) {
-            return RefreshIndicator(
-              color: Colors.white,
-              backgroundColor: AppColors.cardBackground,
-              onRefresh: () async {
-                context.read<AppBlockerBloc>().add(
-                  const LoadInstalledAppsEvent(),
-                );
-                await context.read<AppBlockerBloc>().stream.firstWhere(
-                  (s) => s is! AppBlockerLoading,
-                );
-              },
-              child: CustomScrollView(
-                controller: _scrollController,
-                slivers: [
-                  // App Bar / Header
-                  SliverToBoxAdapter(
-                    child: _buildHeader(context, state),
-                  ),
-
-                  // VPN Service Status & Alert Banner
-                  if (state is AppBlockerLoaded)
-                    SliverToBoxAdapter(
-                      child: _buildVpnStatusCard(context, state),
-                    ),
-
-                  // Search Bar
-                  SliverToBoxAdapter(
-                    child: _buildSearchBar(context, state),
-                  ),
-
-                  // Firewall Status Summary
-                  if (state is AppBlockerLoaded)
-                    SliverToBoxAdapter(
-                      child: _buildStatusSummary(state),
-                    ),
-
-                  // Main Content List / Loading / Error States
-                  _buildContent(context, state),
-                ],
-              ),
-            );
-          },
+            },
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context, AppBlockerState state) {
+  Widget _buildHeader(BuildContext context, AppBlockerState state, ScheduleState schedState) {
     final isFirewallActive = state is AppBlockerLoaded && state.isFirewallActive;
-    final blockedCount = state is AppBlockerLoaded ? state.blockedAppsCount : 0;
+    final blockedCount = state is AppBlockerLoaded ? state.effectiveBlockedCount : 0;
     final vpnStatus = state is AppBlockerLoaded ? state.vpnStatus : VpnStatus.inactive;
 
     final String badgeText;
@@ -132,7 +211,7 @@ class _DashboardPageState extends State<DashboardPage> {
     final Color badgeBg;
     final Color badgeBorder;
 
-    if (vpnStatus == VpnStatus.restarting) {
+    if (vpnStatus == VpnStatus.restarting && blockedCount > 0) {
       badgeText = 'Restarting';
       badgeIcon = Icons.sync_problem_rounded;
       badgeColor = const Color(0xFFFBBF24);
@@ -184,44 +263,59 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
 
-          // Firewall Status Indicator Badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: badgeBg,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: badgeBorder),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  badgeIcon,
-                  size: 16,
-                  color: badgeColor,
+          // Header Actions & Firewall Status Indicator Badge
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                key: const Key('header_schedules_button'),
+                icon: const Icon(Icons.schedule_rounded, size: 22),
+                color: AppColors.accentBlue,
+                tooltip: 'Internet Block Schedules',
+                visualDensity: VisualDensity.compact,
+                onPressed: _navigateToSchedules,
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: badgeBg,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: badgeBorder),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  badgeText,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: badgeColor,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      badgeIcon,
+                      size: 16,
+                      color: badgeColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      badgeText,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: badgeColor,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildVpnStatusCard(BuildContext context, AppBlockerLoaded state) {
+  Widget _buildVpnStatusCard(BuildContext context, AppBlockerLoaded state, ScheduleState schedState) {
     final vpnStatus = state.vpnStatus;
     final isInactiveWithRules =
-        vpnStatus == VpnStatus.inactive && state.blockedAppsCount > 0;
-    final isRestarting = vpnStatus == VpnStatus.restarting;
+        vpnStatus == VpnStatus.inactive && state.effectiveBlockedCount > 0;
+    final isRestarting =
+        vpnStatus == VpnStatus.restarting && state.effectiveBlockedCount > 0;
 
     if (isInactiveWithRules || isRestarting) {
       final title = isRestarting
@@ -332,10 +426,21 @@ class _DashboardPageState extends State<DashboardPage> {
       );
     }
 
-    final isActive = vpnStatus == VpnStatus.active;
+    final enabledScheduleCount = schedState is ScheduleLoaded
+        ? schedState.schedules.where((s) => s.isEnabled).length
+        : 0;
+    final hasEnabledSchedules = enabledScheduleCount > 0;
+
+    final isActive =
+        vpnStatus == VpnStatus.active && state.effectiveBlockedCount > 0;
     final statusLabel = isActive ? 'Active' : 'Inactive';
     final statusColor =
         isActive ? AppColors.activeGreen : AppColors.textSecondary;
+    final statusSubtitle = isActive
+        ? 'Enforcing firewall'
+        : (hasEnabledSchedules
+            ? '$enabledScheduleCount Schedule${enabledScheduleCount == 1 ? '' : 's'} Armed'
+            : 'Idle');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -375,10 +480,12 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             const Spacer(),
             Text(
-              isActive ? 'Enforcing firewall' : 'Idle',
-              style: const TextStyle(
+              statusSubtitle,
+              style: TextStyle(
                 fontSize: 11,
-                color: AppColors.textMuted,
+                color: hasEnabledSchedules && !isActive
+                    ? AppColors.accentBlue
+                    : AppColors.textMuted,
               ),
             ),
           ],
@@ -629,21 +736,146 @@ class _DashboardPageState extends State<DashboardPage> {
             }
 
             final app = apps[index];
+            final isRestrictedBySchedule =
+                app.isSchedulePart == true && app.whichSchedule != null;
+
             return AppCard(
               key: ValueKey(app.packageName),
               app: app,
-              onInternetAccessChanged: (isAllowed) {
-                context.read<AppBlockerBloc>().add(
-                  ToggleAppBlockEvent(
-                    packageName: app.packageName,
-                    isBlocked: !isAllowed,
-                  ),
-                );
-              },
+              onInternetAccessChanged: isRestrictedBySchedule
+                  ? (_) => _showScheduleRestrictedDialog(context, app)
+                  : (isAllowed) {
+                      context.read<AppBlockerBloc>().add(
+                        ToggleAppBlockEvent(
+                          packageName: app.packageName,
+                          isBlocked: !isAllowed,
+                        ),
+                      );
+                    },
+              onRestrictedTap: isRestrictedBySchedule
+                  ? () => _showScheduleRestrictedDialog(context, app)
+                  : null,
             );
           },
           childCount: itemCount,
         ),
+      ),
+    );
+  }
+
+  void _showScheduleRestrictedDialog(BuildContext context, AppInfoEntity app) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardBackground,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.cardBorder, width: 1),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.cardBorderSubtle),
+              ),
+              child: const Icon(
+                Icons.schedule_rounded,
+                color: AppColors.accentBlue,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Schedule Restricted',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "This application is part of a schedule, so you can't enable or disable it manually.",
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            if (app.whichSchedule != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFF0284C7), width: 0.6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.lock_clock_rounded,
+                      size: 12,
+                      color: Color(0xFF38BDF8),
+                    ),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        'Assigned to: ${app.whichSchedule}',
+                        style: const TextStyle(
+                          color: Color(0xFF38BDF8),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            height: 38,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.buttonPrimaryBackground,
+                foregroundColor: AppColors.buttonPrimaryText,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: EdgeInsets.zero,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text(
+                'OK',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
