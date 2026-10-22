@@ -6,6 +6,8 @@ import 'core/di/injection_container.dart';
 import 'core/theme/app_theme.dart';
 import 'features/app_blocker/presentation/bloc/app_blocker_bloc.dart';
 import 'features/app_blocker/presentation/bloc/app_blocker_event.dart';
+import 'features/app_blocker/presentation/bloc/schedule_bloc.dart';
+import 'features/app_blocker/presentation/bloc/schedule_event.dart';
 import 'features/app_blocker/presentation/pages/dashboard_page.dart';
 
 Future<void> main() async {
@@ -19,9 +21,17 @@ class NetGuardApp extends StatelessWidget {
   const NetGuardApp({super.key});
 
   @override
-  Widget build(BuildContext context) => BlocProvider(
-    create: (_) => serviceLocator<AppBlockerBloc>()
-      ..add(const LoadInstalledAppsEvent()),
+  Widget build(BuildContext context) => MultiBlocProvider(
+    providers: [
+      BlocProvider(
+        create: (_) => serviceLocator<AppBlockerBloc>()
+          ..add(const LoadInstalledAppsEvent()),
+      ),
+      BlocProvider(
+        create: (_) => serviceLocator<ScheduleBloc>()
+          ..add(const LoadSchedulesEvent()),
+      ),
+    ],
     child: MaterialApp(
       title: 'NetGuard',
       debugShowCheckedModeBanner: false,
