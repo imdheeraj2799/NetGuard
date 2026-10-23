@@ -46,6 +46,15 @@ class AppBlockerVpnService : VpnService() {
     @Volatile
     private var currentBlockedPackages: Set<String> = emptySet()
 
+    @Volatile
+    private var pendingStartedScheduleIds: Set<String> = emptySet()
+
+    @Volatile
+    private var pendingEndedScheduleIds: Set<String> = emptySet()
+
+    @Volatile
+    private var isExplicitlyStopping = false
+
     override fun onCreate() {
         super.onCreate()
         isServiceRunning = true
@@ -56,6 +65,8 @@ class AppBlockerVpnService : VpnService() {
         val action = intent?.action
         when (action) {
             ACTION_STOP -> {
+                isExplicitlyStopping = true
+                val endedIds = intent.getStringArrayListExtra(EXTRA_PENDING_ENDED_SCHEDULES)?.toSet() ?: emptySet()
                 cancelPendingRetry()
                 currentBlockedPackages = emptySet()
                 saveBlockedPackages(this, emptySet())
@@ -64,6 +75,18 @@ class AppBlockerVpnService : VpnService() {
                 isServiceRunning = false
                 isVpnEstablished = false
                 VpnStatusMonitor.update(VpnState.INACTIVE, 0, null)
+
+                if (endedIds.isNotEmpty()) {
+                    val schedules = NativeScheduleStore.loadSchedules(this)
+                    val endedSchedules = schedules.filter { it.id in endedIds }
+                    ScheduleNotificationManager.onFirewallRulesEnforced(
+                        this,
+                        started = emptyList(),
+                        ended = endedSchedules,
+                        effectiveBlockedPackages = emptySet(),
+                    )
+                }
+
                 // Use stopForeground instead of startForeground to avoid
                 // ForegroundServiceStartNotAllowedException on Android 14 when
                 // no VPN session is active.
@@ -77,13 +100,23 @@ class AppBlockerVpnService : VpnService() {
                 return START_NOT_STICKY
             }
             ACTION_RESTART -> {
+                isExplicitlyStopping = false
                 retryCount = 0
                 cancelPendingRetry()
+                val newStarted = intent.getStringArrayListExtra(EXTRA_PENDING_STARTED_SCHEDULES)?.toSet() ?: emptySet()
+                val newEnded = intent.getStringArrayListExtra(EXTRA_PENDING_ENDED_SCHEDULES)?.toSet() ?: emptySet()
+                pendingStartedScheduleIds = pendingStartedScheduleIds + newStarted
+                pendingEndedScheduleIds = pendingEndedScheduleIds + newEnded
                 val packages = intent.getStringArrayListExtra(EXTRA_BLOCKED_PACKAGES)?.toSet()
                     ?: loadBlockedPackages(this)
                 handleStartOrUpdate(packages)
             }
             ACTION_START, ACTION_UPDATE, null -> {
+                isExplicitlyStopping = false
+                val newStarted = intent?.getStringArrayListExtra(EXTRA_PENDING_STARTED_SCHEDULES)?.toSet() ?: emptySet()
+                val newEnded = intent?.getStringArrayListExtra(EXTRA_PENDING_ENDED_SCHEDULES)?.toSet() ?: emptySet()
+                pendingStartedScheduleIds = pendingStartedScheduleIds + newStarted
+                pendingEndedScheduleIds = pendingEndedScheduleIds + newEnded
                 val packages = intent?.getStringArrayListExtra(EXTRA_BLOCKED_PACKAGES)?.toSet()
                     ?: loadBlockedPackages(this)
                 handleStartOrUpdate(packages)
@@ -133,6 +166,10 @@ class AppBlockerVpnService : VpnService() {
             count,
             "VPN permission revoked. Tap to restore protection.",
         )
+        ScheduleNotificationManager.notifyFirewallFailure(
+            this,
+            "VPN permission was revoked. Protection is inactive.",
+        )
         try {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             notificationManager?.notify(NOTIFICATION_ID, createNotification(count, VpnState.INACTIVE))
@@ -156,6 +193,12 @@ class AppBlockerVpnService : VpnService() {
             remainingCount,
             reason,
         )
+        if (remainingCount > 0 && !isExplicitlyStopping) {
+            ScheduleNotificationManager.notifyFirewallFailure(
+                this,
+                "Firewall protection stopped unexpectedly.",
+            )
+        }
         packetExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -321,6 +364,26 @@ class AppBlockerVpnService : VpnService() {
                 createNotification(blockedPackages.size, VpnState.ACTIVE),
             )
         } catch (_: Exception) {}
+
+        // Notify pending schedule transitions now that rules are verified enforced
+        val startedIds = pendingStartedScheduleIds
+        val endedIds = pendingEndedScheduleIds
+        pendingStartedScheduleIds = emptySet()
+        pendingEndedScheduleIds = emptySet()
+
+        if (startedIds.isNotEmpty() || endedIds.isNotEmpty()) {
+            val allSchedules = NativeScheduleStore.loadSchedules(this)
+            val started = allSchedules.filter { it.id in startedIds }
+            val ended = allSchedules.filter { it.id in endedIds }
+            ScheduleNotificationManager.onFirewallRulesEnforced(
+                this,
+                started = started,
+                ended = ended,
+                effectiveBlockedPackages = blockedPackages,
+            )
+        } else {
+            ScheduleNotificationManager.clearFirewallFailure(this)
+        }
     }
 
     private fun handleConfigurationFailure(blockedPackages: Set<String>) {
@@ -330,6 +393,10 @@ class AppBlockerVpnService : VpnService() {
                 VpnState.INACTIVE,
                 blockedPackages.size,
                 "VPN permission revoked. Tap to restore protection.",
+            )
+            ScheduleNotificationManager.notifyFirewallFailure(
+                this,
+                "VPN permission was revoked. Protection is inactive.",
             )
             updateNotification(blockedPackages.size, VpnState.INACTIVE)
             return
@@ -341,6 +408,10 @@ class AppBlockerVpnService : VpnService() {
                 VpnState.INACTIVE,
                 blockedPackages.size,
                 "Automatic recovery failed after $MAX_RETRIES attempts. Tap to restore.",
+            )
+            ScheduleNotificationManager.notifyFirewallFailure(
+                this,
+                "Automatic firewall recovery failed after $MAX_RETRIES attempts. Protection is inactive.",
             )
             updateNotification(blockedPackages.size, VpnState.INACTIVE)
             return
@@ -483,6 +554,8 @@ class AppBlockerVpnService : VpnService() {
         const val ACTION_RESTART = "com.app.net_guard.action.RESTART_VPN"
 
         const val EXTRA_BLOCKED_PACKAGES = "blocked_packages"
+        const val EXTRA_PENDING_STARTED_SCHEDULES = "pending_started_schedules"
+        const val EXTRA_PENDING_ENDED_SCHEDULES = "pending_ended_schedules"
 
         private const val PREFERENCES_NAME = "app_blocker_vpn"
         private const val BLOCKED_PACKAGES_KEY = "blocked_packages"

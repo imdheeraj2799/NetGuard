@@ -1,10 +1,15 @@
 package com.app.net_guard
-
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -13,7 +18,32 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     private var pendingVpnStart: PendingVpnStart? = null
+    private var pendingNotificationPermissionResult: MethodChannel.Result? = null
+    private var initialNotificationPayload: Map<String, Any?>? = null
     private val vpnStatusListeners = mutableListOf<EventChannel.EventSink>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        handleIntentExtras(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntentExtras(intent)
+    }
+
+    private fun handleIntentExtras(intent: Intent?) {
+        val route = intent?.getStringExtra("route")
+        if (!route.isNullOrBlank()) {
+            initialNotificationPayload = mapOf(
+                "route" to route,
+                "schedule_id" to intent.getStringExtra("schedule_id"),
+                "schedule_name" to intent.getStringExtra("schedule_name"),
+                "action" to intent.getStringExtra("action"),
+            )
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -88,6 +118,12 @@ class MainActivity : FlutterFragmentActivity() {
             null,
         )
         pendingVpnStart = null
+        pendingNotificationPermissionResult?.error(
+            "activity_destroyed",
+            "Notification permission request was interrupted.",
+            null,
+        )
+        pendingNotificationPermissionResult = null
         vpnStatusListeners.clear()
         super.onDestroy()
     }
@@ -121,6 +157,19 @@ class MainActivity : FlutterFragmentActivity() {
                 "VPN permission was denied. No applications were blocked.",
                 null,
             )
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            pendingNotificationPermissionResult?.success(granted)
+            pendingNotificationPermissionResult = null
         }
     }
 
@@ -191,6 +240,36 @@ class MainActivity : FlutterFragmentActivity() {
                 } else {
                     result.success(true)
                 }
+            }
+            "areNotificationsEnabled" -> {
+                val enabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
+                result.success(enabled)
+            }
+            "requestNotificationPermission" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                        result.success(true)
+                    } else {
+                        if (pendingNotificationPermissionResult != null) {
+                            result.error("permission_pending", "A notification permission request is already in progress.", null)
+                            return
+                        }
+                        pendingNotificationPermissionResult = result
+                        ActivityCompat.requestPermissions(
+                            this,
+                            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                            NOTIFICATION_PERMISSION_REQUEST_CODE,
+                        )
+                    }
+                } else {
+                    val enabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
+                    result.success(enabled)
+                }
+            }
+            "getInitialNotificationPayload" -> {
+                val payload = initialNotificationPayload
+                initialNotificationPayload = null
+                result.success(payload)
             }
             else -> result.notImplemented()
         }
@@ -338,5 +417,6 @@ class MainActivity : FlutterFragmentActivity() {
         private const val VPN_STATUS_CHANNEL = "com.app.net_guard/vpn_status"
         private const val LEGACY_VPN_STATUS_CHANNEL = "com.example.blocker/vpn_status"
         private const val VPN_PERMISSION_REQUEST_CODE = 4142
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 4143
     }
 }
