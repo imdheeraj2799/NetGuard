@@ -9,4 +9,8 @@
     <string name="vpn_notification_restarting_text">Restoring internet blocking protection...</string>
     <string name="vpn_notification_inactive_title">Internet blocking is inactive</string>
     <string name="vpn_notification_inactive_text">Tap to restore protection for %1$d app(s)</string>
+    <string name="schedule_notification_channel_name">Firewall Schedule Alerts</string>
+    <string name="schedule_notification_channel_description">Notifications when internet blocking schedules activate or deactivate</string>
+    <string name="failure_notification_channel_name">Firewall Alerts</string>
+    <string name="failure_notification_channel_description">Notifications when internet-blocking firewall protection stops or fails</string>
 </resources>
