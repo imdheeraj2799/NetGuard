@@ -90,6 +90,9 @@ class ScheduleListPage extends StatelessWidget {
           final canScheduleExactAlarms = state is ScheduleLoaded
               ? state.canScheduleExactAlarms
               : (state is ScheduleError ? state.canScheduleExactAlarms : true);
+          final areNotificationsEnabled = state is ScheduleLoaded
+              ? state.areNotificationsEnabled
+              : (state is ScheduleError ? state.areNotificationsEnabled : true);
 
           return RefreshIndicator(
             color: AppColors.buttonPrimaryText,
@@ -100,6 +103,74 @@ class ScheduleListPage extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.only(bottom: 96, top: 8),
               children: [
+                // Notification Permission Explanation Banner
+                if (!areNotificationsEnabled) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E293B),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFF38BDF8),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.notifications_active_rounded,
+                            color: Color(0xFF38BDF8),
+                            size: 24,
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Schedule Notifications Disabled',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF38BDF8),
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Receive alerts when scheduled internet blocking begins or ends, and if firewall protection is interrupted.',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFFBAE6FD),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              context.read<ScheduleBloc>().add(
+                                    const RequestNotificationPermissionEvent(),
+                                  );
+                            },
+                            child: const Text(
+                              'Enable',
+                              style: TextStyle(
+                                color: Color(0xFF38BDF8),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
                 // Exact Alarm Permission Warning Banner
                 if (!canScheduleExactAlarms) ...[
                   Padding(
