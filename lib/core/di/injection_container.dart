@@ -6,20 +6,37 @@ import '../../features/app_blocker/data/datasources/app_local_data_source.dart';
 import '../../features/app_blocker/data/datasources/installed_apps_data_source.dart';
 import '../../features/app_blocker/data/datasources/local_storage_data_source.dart';
 import '../../features/app_blocker/data/datasources/native_app_data_source.dart';
+import '../../features/app_blocker/data/datasources/schedule_local_data_source.dart';
 import '../../features/app_blocker/data/repositories/app_blocker_repository_impl.dart';
+import '../../features/app_blocker/data/repositories/schedule_repository_impl.dart';
 import '../../features/app_blocker/domain/repositories/app_blocker_repository.dart';
+import '../../features/app_blocker/domain/repositories/schedule_repository.dart';
+import '../../features/app_blocker/domain/services/firewall_rule_engine.dart';
+import '../../features/app_blocker/domain/services/schedule_conflict_validator.dart';
+import '../../features/app_blocker/domain/services/schedule_engine.dart';
+import '../../features/app_blocker/domain/usecases/can_schedule_exact_alarms_usecase.dart';
+import '../../features/app_blocker/domain/usecases/delete_schedule_usecase.dart';
+import '../../features/app_blocker/domain/usecases/get_assigned_packages_usecase.dart';
+import '../../features/app_blocker/domain/usecases/get_effective_blocked_packages_usecase.dart';
 import '../../features/app_blocker/domain/usecases/get_installed_apps_usecase.dart';
+import '../../features/app_blocker/domain/usecases/get_schedules_usecase.dart';
 import '../../features/app_blocker/domain/usecases/get_vpn_status_usecase.dart';
+import '../../features/app_blocker/domain/usecases/request_exact_alarm_permission_usecase.dart';
 import '../../features/app_blocker/domain/usecases/restart_vpn_usecase.dart';
+import '../../features/app_blocker/domain/usecases/save_schedule_usecase.dart';
+import '../../features/app_blocker/domain/usecases/sync_schedules_usecase.dart';
 import '../../features/app_blocker/domain/usecases/toggle_block_status_usecase.dart';
+import '../../features/app_blocker/domain/usecases/toggle_schedule_usecase.dart';
 import '../../features/app_blocker/domain/usecases/watch_vpn_status_usecase.dart';
 import '../../features/app_blocker/presentation/bloc/app_blocker_bloc.dart';
+import '../../features/app_blocker/presentation/bloc/schedule_bloc.dart';
 
 final serviceLocator = GetIt.instance;
 
 Future<void> initializeDependencies({
   Box<Map>? appsBox,
   Box<dynamic>? settingsBox,
+  Box<Map>? schedulesBox,
 }) async {
   if (serviceLocator.isRegistered<AppBlockerBloc>()) return;
 
@@ -29,6 +46,9 @@ Future<void> initializeDependencies({
   final resolvedSettingsBox =
       settingsBox ??
       await Hive.openBox<dynamic>(AppLocalDataSourceImpl.settingsBoxName);
+  final resolvedSchedulesBox =
+      schedulesBox ??
+      await Hive.openBox<Map>(ScheduleLocalDataSourceImpl.schedulesBoxName);
 
   serviceLocator
     ..registerLazySingleton<SharedPreferences>(() => preferences)
@@ -39,6 +59,10 @@ Future<void> initializeDependencies({
     ..registerLazySingleton<Box<dynamic>>(
       () => resolvedSettingsBox,
       instanceName: 'settingsBox',
+    )
+    ..registerLazySingleton<Box<Map>>(
+      () => resolvedSchedulesBox,
+      instanceName: 'schedulesBox',
     )
     ..registerLazySingleton<NativeAppDataSource>(NativeAppDataSourceImpl.new)
     ..registerLazySingleton<InstalledAppsGateway>(InstalledAppsGatewayImpl.new)
@@ -54,6 +78,19 @@ Future<void> initializeDependencies({
         settingsBox: resolvedSettingsBox,
       ),
     )
+    ..registerLazySingleton<ScheduleLocalDataSource>(
+      () => ScheduleLocalDataSourceImpl(
+        schedulesBox: resolvedSchedulesBox,
+        preferences: serviceLocator(),
+      ),
+    )
+    ..registerLazySingleton<ScheduleEngine>(ScheduleEngine.new)
+    ..registerLazySingleton<ScheduleConflictValidator>(
+      ScheduleConflictValidator.new,
+    )
+    ..registerLazySingleton<FirewallRuleEngine>(
+      () => FirewallRuleEngine(scheduleEngine: serviceLocator()),
+    )
     ..registerLazySingleton<AppBlockerRepository>(
       () => AppBlockerRepositoryImpl(
         installedAppsDataSource: serviceLocator(),
@@ -62,11 +99,36 @@ Future<void> initializeDependencies({
         appLocalDataSource: serviceLocator(),
       ),
     )
+    ..registerLazySingleton<ScheduleRepository>(
+      () => ScheduleRepositoryImpl(
+        scheduleLocalDataSource: serviceLocator(),
+        localStorageDataSource: serviceLocator(),
+        nativeDataSource: serviceLocator(),
+        appLocalDataSource: serviceLocator(),
+        conflictValidator: serviceLocator(),
+        ruleEngine: serviceLocator(),
+      ),
+    )
     ..registerLazySingleton(() => GetInstalledAppsUseCase(serviceLocator()))
     ..registerLazySingleton(() => ToggleBlockStatusUseCase(serviceLocator()))
     ..registerLazySingleton(() => GetVpnStatusUseCase(serviceLocator()))
     ..registerLazySingleton(() => WatchVpnStatusUseCase(serviceLocator()))
     ..registerLazySingleton(() => RestartVpnUseCase(serviceLocator()))
+    ..registerLazySingleton(() => GetSchedulesUseCase(serviceLocator()))
+    ..registerLazySingleton(() => SaveScheduleUseCase(serviceLocator()))
+    ..registerLazySingleton(() => DeleteScheduleUseCase(serviceLocator()))
+    ..registerLazySingleton(() => ToggleScheduleUseCase(serviceLocator()))
+    ..registerLazySingleton(
+      () => GetEffectiveBlockedPackagesUseCase(serviceLocator()),
+    )
+    ..registerLazySingleton(() => GetAssignedPackagesUseCase(serviceLocator()))
+    ..registerLazySingleton(
+      () => CanScheduleExactAlarmsUseCase(serviceLocator()),
+    )
+    ..registerLazySingleton(
+      () => RequestExactAlarmPermissionUseCase(serviceLocator()),
+    )
+    ..registerLazySingleton(() => SyncSchedulesUseCase(serviceLocator()))
     ..registerFactory(
       () => AppBlockerBloc(
         getInstalledApps: serviceLocator(),
@@ -74,6 +136,17 @@ Future<void> initializeDependencies({
         getVpnStatus: serviceLocator(),
         watchVpnStatus: serviceLocator(),
         restartVpn: serviceLocator(),
+      ),
+    )
+    ..registerFactory(
+      () => ScheduleBloc(
+        getSchedules: serviceLocator(),
+        saveSchedule: serviceLocator(),
+        deleteSchedule: serviceLocator(),
+        toggleSchedule: serviceLocator(),
+        getAssignedPackages: serviceLocator(),
+        canScheduleExactAlarms: serviceLocator(),
+        requestExactAlarmPermission: serviceLocator(),
       ),
     );
 }
