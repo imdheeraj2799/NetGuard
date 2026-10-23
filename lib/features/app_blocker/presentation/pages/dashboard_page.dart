@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/di/injection_container.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/app_snackbar.dart';
+import '../../data/datasources/native_app_data_source.dart';
 import '../../domain/entities/app_info_entity.dart';
 import '../bloc/app_blocker_bloc.dart';
 import '../bloc/app_blocker_event.dart';
@@ -30,13 +32,28 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkInitialNotificationRoute();
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       context.read<AppBlockerBloc>().add(const CheckVpnStatusEvent());
+      _checkInitialNotificationRoute();
     }
+  }
+
+  Future<void> _checkInitialNotificationRoute() async {
+    try {
+      if (!serviceLocator.isRegistered<NativeAppDataSource>()) return;
+      final nativeDataSource = serviceLocator<NativeAppDataSource>();
+      final payload = await nativeDataSource.getInitialNotificationPayload();
+      if (payload != null && payload['route'] == 'schedule' && mounted) {
+        _navigateToSchedules();
+      }
+    } catch (_) {}
   }
 
   void _onScroll() {
