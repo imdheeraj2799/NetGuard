@@ -5,11 +5,13 @@ import 'package:mocktail/mocktail.dart';
 import 'package:net_guard/core/error/failure.dart';
 import 'package:net_guard/core/usecase/usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/entities/block_schedule_entity.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/are_notifications_enabled_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/can_schedule_exact_alarms_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/delete_schedule_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/get_assigned_packages_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/get_schedules_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/request_exact_alarm_permission_usecase.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/request_notification_permission_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/save_schedule_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/toggle_schedule_usecase.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/schedule_bloc.dart';
@@ -23,6 +25,8 @@ class MockToggleScheduleUseCase extends Mock implements ToggleScheduleUseCase {}
 class MockGetAssignedPackagesUseCase extends Mock implements GetAssignedPackagesUseCase {}
 class MockCanScheduleExactAlarmsUseCase extends Mock implements CanScheduleExactAlarmsUseCase {}
 class MockRequestExactAlarmPermissionUseCase extends Mock implements RequestExactAlarmPermissionUseCase {}
+class MockAreNotificationsEnabledUseCase extends Mock implements AreNotificationsEnabledUseCase {}
+class MockRequestNotificationPermissionUseCase extends Mock implements RequestNotificationPermissionUseCase {}
 
 class FakeSaveScheduleParams extends Fake implements SaveScheduleParams {}
 class FakeDeleteScheduleParams extends Fake implements DeleteScheduleParams {}
@@ -37,6 +41,8 @@ void main() {
   late MockGetAssignedPackagesUseCase mockGetAssignedPackages;
   late MockCanScheduleExactAlarmsUseCase mockCanScheduleExactAlarms;
   late MockRequestExactAlarmPermissionUseCase mockRequestExactAlarmPermission;
+  late MockAreNotificationsEnabledUseCase mockAreNotificationsEnabled;
+  late MockRequestNotificationPermissionUseCase mockRequestNotificationPermission;
   late ScheduleBloc bloc;
 
   final fixedDate = DateTime(2026, 10, 21, 10, 0);
@@ -70,8 +76,12 @@ void main() {
     mockGetAssignedPackages = MockGetAssignedPackagesUseCase();
     mockCanScheduleExactAlarms = MockCanScheduleExactAlarmsUseCase();
     mockRequestExactAlarmPermission = MockRequestExactAlarmPermissionUseCase();
+    mockAreNotificationsEnabled = MockAreNotificationsEnabledUseCase();
+    mockRequestNotificationPermission = MockRequestNotificationPermissionUseCase();
 
     when(() => mockCanScheduleExactAlarms(any()))
+        .thenAnswer((_) async => const Right(true));
+    when(() => mockAreNotificationsEnabled(any()))
         .thenAnswer((_) async => const Right(true));
     when(() => mockGetAssignedPackages(any()))
         .thenAnswer((_) async => const Right({'com.work.app': 'Work'}));
@@ -84,6 +94,8 @@ void main() {
       getAssignedPackages: mockGetAssignedPackages,
       canScheduleExactAlarms: mockCanScheduleExactAlarms,
       requestExactAlarmPermission: mockRequestExactAlarmPermission,
+      areNotificationsEnabled: mockAreNotificationsEnabled,
+      requestNotificationPermission: mockRequestNotificationPermission,
     );
   });
 
@@ -252,6 +264,73 @@ void main() {
           canScheduleExactAlarms: true,
         ),
       ],
+    );
+  });
+
+  group('ScheduleBloc - CheckNotificationPermissionEvent', () {
+    blocTest<ScheduleBloc, ScheduleState>(
+      'checks permission and updates areNotificationsEnabled in state',
+      seed: () => ScheduleLoaded(
+        schedules: [sampleSchedule],
+        areNotificationsEnabled: true,
+      ),
+      build: () {
+        when(() => mockAreNotificationsEnabled(any()))
+            .thenAnswer((_) async => const Right(false));
+        return bloc;
+      },
+      act: (bloc) => bloc.add(const CheckNotificationPermissionEvent()),
+      expect: () => [
+        ScheduleLoaded(
+          schedules: [sampleSchedule],
+          areNotificationsEnabled: false,
+        ),
+      ],
+    );
+  });
+
+  group('ScheduleBloc - RequestNotificationPermissionEvent', () {
+    blocTest<ScheduleBloc, ScheduleState>(
+      'requests permission and updates areNotificationsEnabled when granted',
+      seed: () => ScheduleLoaded(
+        schedules: [sampleSchedule],
+        areNotificationsEnabled: false,
+      ),
+      build: () {
+        when(() => mockRequestNotificationPermission(any()))
+            .thenAnswer((_) async => const Right(true));
+        when(() => mockAreNotificationsEnabled(any()))
+            .thenAnswer((_) async => const Right(true));
+        return bloc;
+      },
+      act: (bloc) => bloc.add(const RequestNotificationPermissionEvent()),
+      expect: () => [
+        ScheduleLoaded(
+          schedules: [sampleSchedule],
+          areNotificationsEnabled: true,
+        ),
+      ],
+    );
+
+    blocTest<ScheduleBloc, ScheduleState>(
+      'handles denied permission gracefully without error or breaking schedule state',
+      seed: () => ScheduleLoaded(
+        schedules: [sampleSchedule],
+        areNotificationsEnabled: false,
+      ),
+      build: () {
+        when(() => mockRequestNotificationPermission(any()))
+            .thenAnswer((_) async => const Right(false));
+        when(() => mockAreNotificationsEnabled(any()))
+            .thenAnswer((_) async => const Right(false));
+        return bloc;
+      },
+      act: (bloc) => bloc.add(const RequestNotificationPermissionEvent()),
+      expect: () => [],
+      verify: (bloc) {
+        expect((bloc.state as ScheduleLoaded).areNotificationsEnabled, isFalse);
+        expect((bloc.state as ScheduleLoaded).schedules, [sampleSchedule]);
+      },
     );
   });
 }

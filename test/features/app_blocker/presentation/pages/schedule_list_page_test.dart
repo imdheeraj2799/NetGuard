@@ -94,6 +94,31 @@ void main() {
     verify(() => bloc.add(const RequestExactAlarmPermissionEvent())).called(1);
   });
 
+  testWidgets('renders notification permission banner when areNotificationsEnabled is false', (tester) async {
+    when(() => bloc.state).thenReturn(
+      ScheduleLoaded(
+        schedules: [sampleSchedule],
+        areNotificationsEnabled: false,
+      ),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.text('Schedule Notifications Disabled'), findsOneWidget);
+    expect(
+      find.text(
+        'Receive alerts when scheduled internet blocking begins or ends, and if firewall protection is interrupted.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Enable'), findsOneWidget);
+
+    await tester.tap(find.text('Enable'));
+    await tester.pump();
+
+    verify(() => bloc.add(const RequestNotificationPermissionEvent())).called(1);
+  });
+
   testWidgets('deleting a schedule shows confirmation dialog and dispatches event on confirm', (tester) async {
     when(() => bloc.state).thenReturn(
       ScheduleLoaded(schedules: [sampleSchedule]),
