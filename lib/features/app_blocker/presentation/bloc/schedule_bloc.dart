@@ -4,11 +4,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/usecase/usecase.dart';
 import '../../domain/entities/block_schedule_entity.dart';
+import '../../domain/usecases/are_notifications_enabled_usecase.dart';
 import '../../domain/usecases/can_schedule_exact_alarms_usecase.dart';
 import '../../domain/usecases/delete_schedule_usecase.dart';
 import '../../domain/usecases/get_assigned_packages_usecase.dart';
 import '../../domain/usecases/get_schedules_usecase.dart';
 import '../../domain/usecases/request_exact_alarm_permission_usecase.dart';
+import '../../domain/usecases/request_notification_permission_usecase.dart';
 import '../../domain/usecases/save_schedule_usecase.dart';
 import '../../domain/usecases/toggle_schedule_usecase.dart';
 import 'schedule_event.dart';
@@ -23,6 +25,8 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
     required GetAssignedPackagesUseCase getAssignedPackages,
     required CanScheduleExactAlarmsUseCase canScheduleExactAlarms,
     required RequestExactAlarmPermissionUseCase requestExactAlarmPermission,
+    AreNotificationsEnabledUseCase? areNotificationsEnabled,
+    RequestNotificationPermissionUseCase? requestNotificationPermission,
   })  : _getSchedules = getSchedules,
         _saveSchedule = saveSchedule,
         _deleteSchedule = deleteSchedule,
@@ -30,12 +34,16 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
         _getAssignedPackages = getAssignedPackages,
         _canScheduleExactAlarms = canScheduleExactAlarms,
         _requestExactAlarmPermission = requestExactAlarmPermission,
+        _areNotificationsEnabled = areNotificationsEnabled,
+        _requestNotificationPermission = requestNotificationPermission,
         super(const ScheduleInitial()) {
     on<LoadSchedulesEvent>(_onLoadSchedules);
     on<SaveScheduleEvent>(_onSaveSchedule);
     on<DeleteScheduleEvent>(_onDeleteSchedule);
     on<ToggleScheduleEvent>(_onToggleSchedule);
     on<RequestExactAlarmPermissionEvent>(_onRequestExactAlarmPermission);
+    on<CheckNotificationPermissionEvent>(_onCheckNotificationPermission);
+    on<RequestNotificationPermissionEvent>(_onRequestNotificationPermission);
   }
 
   final GetSchedulesUseCase _getSchedules;
@@ -45,6 +53,8 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
   final GetAssignedPackagesUseCase _getAssignedPackages;
   final CanScheduleExactAlarmsUseCase _canScheduleExactAlarms;
   final RequestExactAlarmPermissionUseCase _requestExactAlarmPermission;
+  final AreNotificationsEnabledUseCase? _areNotificationsEnabled;
+  final RequestNotificationPermissionUseCase? _requestNotificationPermission;
 
   Future<void> _onLoadSchedules(
     LoadSchedulesEvent event,
@@ -57,20 +67,26 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
     final schedulesResult = await _getSchedules(const NoParams());
     final assignedResult = await _getAssignedPackages(const GetAssignedPackagesParams());
     final exactAlarmResult = await _canScheduleExactAlarms(const NoParams());
+    final notifResult = _areNotificationsEnabled != null
+        ? await _areNotificationsEnabled(const NoParams())
+        : null;
 
     final canSchedule = exactAlarmResult.getOrElse(() => true);
+    final areNotificationsEnabled = notifResult?.getOrElse(() => true) ?? true;
     final assignedPackages = assignedResult.getOrElse(() => const {});
 
     schedulesResult.fold(
       (failure) => emit(ScheduleError(
         message: failure.message,
         canScheduleExactAlarms: canSchedule,
+        areNotificationsEnabled: areNotificationsEnabled,
       )),
       (schedules) {
         emit(ScheduleLoaded(
           schedules: schedules,
           assignedPackages: assignedPackages,
           canScheduleExactAlarms: canSchedule,
+          areNotificationsEnabled: areNotificationsEnabled,
         ));
       },
     );
@@ -83,6 +99,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
     final currentSchedules = _getCurrentSchedules();
     final currentAssigned = _getCurrentAssigned();
     final currentCanSchedule = _getCurrentCanSchedule();
+    final currentAreNotificationsEnabled = _getCurrentAreNotificationsEnabled();
 
     final result = await _saveSchedule(SaveScheduleParams(event.schedule));
 
@@ -93,6 +110,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
           schedules: currentSchedules,
           assignedPackages: currentAssigned,
           canScheduleExactAlarms: currentCanSchedule,
+          areNotificationsEnabled: currentAreNotificationsEnabled,
         ));
       },
       (_) async {
@@ -107,6 +125,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
           schedules: schedules,
           assignedPackages: assigned,
           canScheduleExactAlarms: currentCanSchedule,
+          areNotificationsEnabled: currentAreNotificationsEnabled,
           actionMessage: 'Schedule "${event.schedule.name.isEmpty ? 'Schedule' : event.schedule.name}" saved successfully',
         ));
       },
@@ -120,6 +139,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
     final currentSchedules = _getCurrentSchedules();
     final currentAssigned = _getCurrentAssigned();
     final currentCanSchedule = _getCurrentCanSchedule();
+    final currentAreNotificationsEnabled = _getCurrentAreNotificationsEnabled();
 
     final result = await _deleteSchedule(DeleteScheduleParams(event.id));
 
@@ -130,6 +150,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
           schedules: currentSchedules,
           assignedPackages: currentAssigned,
           canScheduleExactAlarms: currentCanSchedule,
+          areNotificationsEnabled: currentAreNotificationsEnabled,
         ));
       },
       (_) async {
@@ -144,6 +165,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
           schedules: schedules,
           assignedPackages: assigned,
           canScheduleExactAlarms: currentCanSchedule,
+          areNotificationsEnabled: currentAreNotificationsEnabled,
           actionMessage: 'Schedule deleted',
         ));
       },
@@ -157,6 +179,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
     final currentSchedules = _getCurrentSchedules();
     final currentAssigned = _getCurrentAssigned();
     final currentCanSchedule = _getCurrentCanSchedule();
+    final currentAreNotificationsEnabled = _getCurrentAreNotificationsEnabled();
 
     final result = await _toggleSchedule(
       ToggleScheduleParams(id: event.id, isEnabled: event.isEnabled),
@@ -169,6 +192,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
           schedules: currentSchedules,
           assignedPackages: currentAssigned,
           canScheduleExactAlarms: currentCanSchedule,
+          areNotificationsEnabled: currentAreNotificationsEnabled,
         ));
       },
       (_) async {
@@ -183,6 +207,7 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
           schedules: schedules,
           assignedPackages: assigned,
           canScheduleExactAlarms: currentCanSchedule,
+          areNotificationsEnabled: currentAreNotificationsEnabled,
         ));
       },
     );
@@ -206,6 +231,55 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
         schedules: err.schedules,
         assignedPackages: err.assignedPackages,
         canScheduleExactAlarms: canSchedule,
+        areNotificationsEnabled: err.areNotificationsEnabled,
+      ));
+    }
+  }
+
+  Future<void> _onCheckNotificationPermission(
+    CheckNotificationPermissionEvent event,
+    Emitter<ScheduleState> emit,
+  ) async {
+    if (_areNotificationsEnabled == null) return;
+    final check = await _areNotificationsEnabled(const NoParams());
+    final areEnabled = check.getOrElse(() => true);
+
+    if (state is ScheduleLoaded) {
+      emit((state as ScheduleLoaded).copyWith(areNotificationsEnabled: areEnabled));
+    } else if (state is ScheduleError) {
+      final err = state as ScheduleError;
+      emit(ScheduleError(
+        message: err.message,
+        schedules: err.schedules,
+        assignedPackages: err.assignedPackages,
+        canScheduleExactAlarms: err.canScheduleExactAlarms,
+        areNotificationsEnabled: areEnabled,
+      ));
+    }
+  }
+
+  Future<void> _onRequestNotificationPermission(
+    RequestNotificationPermissionEvent event,
+    Emitter<ScheduleState> emit,
+  ) async {
+    if (_requestNotificationPermission != null) {
+      await _requestNotificationPermission(const NoParams());
+    }
+    final check = _areNotificationsEnabled != null
+        ? await _areNotificationsEnabled(const NoParams())
+        : null;
+    final areEnabled = check?.getOrElse(() => true) ?? true;
+
+    if (state is ScheduleLoaded) {
+      emit((state as ScheduleLoaded).copyWith(areNotificationsEnabled: areEnabled));
+    } else if (state is ScheduleError) {
+      final err = state as ScheduleError;
+      emit(ScheduleError(
+        message: err.message,
+        schedules: err.schedules,
+        assignedPackages: err.assignedPackages,
+        canScheduleExactAlarms: err.canScheduleExactAlarms,
+        areNotificationsEnabled: areEnabled,
       ));
     }
   }
@@ -236,6 +310,16 @@ class ScheduleBloc extends Bloc<ScheduleEvent, ScheduleState> {
     }
     if (state is ScheduleError) {
       return (state as ScheduleError).canScheduleExactAlarms;
+    }
+    return true;
+  }
+
+  bool _getCurrentAreNotificationsEnabled() {
+    if (state is ScheduleLoaded) {
+      return (state as ScheduleLoaded).areNotificationsEnabled;
+    }
+    if (state is ScheduleError) {
+      return (state as ScheduleError).areNotificationsEnabled;
     }
     return true;
   }

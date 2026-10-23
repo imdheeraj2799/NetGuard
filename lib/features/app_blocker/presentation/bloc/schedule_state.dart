@@ -19,18 +19,21 @@ class ScheduleLoaded extends ScheduleState {
     required this.schedules,
     this.assignedPackages = const {},
     this.canScheduleExactAlarms = true,
+    this.areNotificationsEnabled = true,
     this.actionMessage,
   });
 
   final List<BlockScheduleEntity> schedules;
   final Map<String, String> assignedPackages;
   final bool canScheduleExactAlarms;
+  final bool areNotificationsEnabled;
   final String? actionMessage;
 
   ScheduleLoaded copyWith({
     List<BlockScheduleEntity>? schedules,
     Map<String, String>? assignedPackages,
     bool? canScheduleExactAlarms,
+    bool? areNotificationsEnabled,
     String? actionMessage,
   }) {
     return ScheduleLoaded(
@@ -38,6 +41,8 @@ class ScheduleLoaded extends ScheduleState {
       assignedPackages: assignedPackages ?? this.assignedPackages,
       canScheduleExactAlarms:
           canScheduleExactAlarms ?? this.canScheduleExactAlarms,
+      areNotificationsEnabled:
+          areNotificationsEnabled ?? this.areNotificationsEnabled,
       actionMessage: actionMessage,
     );
   }
@@ -49,6 +54,7 @@ class ScheduleLoaded extends ScheduleState {
           listEquals(schedules, other.schedules) &&
           mapEquals(assignedPackages, other.assignedPackages) &&
           canScheduleExactAlarms == other.canScheduleExactAlarms &&
+          areNotificationsEnabled == other.areNotificationsEnabled &&
           actionMessage == other.actionMessage;
 
   @override
@@ -56,6 +62,7 @@ class ScheduleLoaded extends ScheduleState {
         Object.hashAll(schedules),
         Object.hashAll(assignedPackages.entries),
         canScheduleExactAlarms,
+        areNotificationsEnabled,
         actionMessage,
       );
 }
@@ -66,12 +73,14 @@ class ScheduleError extends ScheduleState {
     this.schedules = const [],
     this.assignedPackages = const {},
     this.canScheduleExactAlarms = true,
+    this.areNotificationsEnabled = true,
   });
 
   final String message;
   final List<BlockScheduleEntity> schedules;
   final Map<String, String> assignedPackages;
   final bool canScheduleExactAlarms;
+  final bool areNotificationsEnabled;
 
   @override
   bool operator ==(Object other) =>
@@ -80,7 +89,8 @@ class ScheduleError extends ScheduleState {
           message == other.message &&
           listEquals(schedules, other.schedules) &&
           mapEquals(assignedPackages, other.assignedPackages) &&
-          canScheduleExactAlarms == other.canScheduleExactAlarms;
+          canScheduleExactAlarms == other.canScheduleExactAlarms &&
+          areNotificationsEnabled == other.areNotificationsEnabled;
 
   @override
   int get hashCode => Object.hash(
@@ -88,5 +98,6 @@ class ScheduleError extends ScheduleState {
         Object.hashAll(schedules),
         Object.hashAll(assignedPackages.entries),
         canScheduleExactAlarms,
+        areNotificationsEnabled,
       );
 }

@@ -57,3 +57,11 @@ class ToggleScheduleEvent extends ScheduleEvent {
 class RequestExactAlarmPermissionEvent extends ScheduleEvent {
   const RequestExactAlarmPermissionEvent();
 }
+
+class CheckNotificationPermissionEvent extends ScheduleEvent {
+  const CheckNotificationPermissionEvent();
+}
+
+class RequestNotificationPermissionEvent extends ScheduleEvent {
+  const RequestNotificationPermissionEvent();
+}
