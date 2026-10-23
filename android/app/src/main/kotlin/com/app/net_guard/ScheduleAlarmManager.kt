@@ -78,16 +78,34 @@ object ScheduleAlarmManager {
         val effectivePackages = (manualPackages + activeSchedulePackages).toSet()
         Log.i(TAG, "Reconciling firewall: manual=${manualPackages.size}, scheduled=${activeSchedulePackages.size}, effective=${effectivePackages.size}")
 
+        // Prune deleted or disabled schedules from notification active tracking
+        ScheduleNotificationManager.syncSchedules(context, schedules)
+
+        // Detect transitions for enabled schedules
+        val transitions = ScheduleNotificationManager.detectTransitions(context, schedules, now)
+
         AppBlockerVpnService.saveBlockedPackages(context, effectivePackages)
 
         if (effectivePackages.isEmpty()) {
             if (AppBlockerVpnService.isServiceRunning) {
                 val intent = Intent(context, AppBlockerVpnService::class.java).apply {
                     action = AppBlockerVpnService.ACTION_STOP
+                    putStringArrayListExtra(
+                        AppBlockerVpnService.EXTRA_PENDING_ENDED_SCHEDULES,
+                        ArrayList(transitions.endedSchedules.map { it.id }),
+                    )
                 }
                 try {
                     context.startService(intent)
                 } catch (_: Exception) {}
+            } else {
+                // VPN is not running, so rules are already effectively cleared
+                ScheduleNotificationManager.onFirewallRulesEnforced(
+                    context,
+                    started = emptyList(),
+                    ended = transitions.endedSchedules,
+                    effectiveBlockedPackages = emptySet(),
+                )
             }
         } else {
             val permissionRevoked = VpnService.prepare(context) != null
@@ -103,6 +121,14 @@ object ScheduleAlarmManager {
                         AppBlockerVpnService.EXTRA_BLOCKED_PACKAGES,
                         ArrayList(effectivePackages),
                     )
+                    putStringArrayListExtra(
+                        AppBlockerVpnService.EXTRA_PENDING_STARTED_SCHEDULES,
+                        ArrayList(transitions.startedSchedules.map { it.id }),
+                    )
+                    putStringArrayListExtra(
+                        AppBlockerVpnService.EXTRA_PENDING_ENDED_SCHEDULES,
+                        ArrayList(transitions.endedSchedules.map { it.id }),
+                    )
                 }
                 try {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -112,6 +138,10 @@ object ScheduleAlarmManager {
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to start/update VPN service from schedule engine: ${e.message}")
+                    ScheduleNotificationManager.notifyFirewallFailure(
+                        context,
+                        "Failed to start firewall service. Internet-blocking protection may be inactive.",
+                    )
                 }
             } else {
                 Log.w(TAG, "VPN permission not granted; cannot apply effective schedule packages")
@@ -119,6 +149,10 @@ object ScheduleAlarmManager {
                     VpnState.INACTIVE,
                     effectivePackages.size,
                     "VPN permission required to enforce scheduled firewall rules.",
+                )
+                ScheduleNotificationManager.notifyFirewallFailure(
+                    context,
+                    "VPN permission required to enforce scheduled firewall rules. Protection is inactive.",
                 )
             }
         }
