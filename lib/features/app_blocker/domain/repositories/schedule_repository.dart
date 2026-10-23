@@ -19,5 +19,7 @@ abstract class ScheduleRepository {
   });
   Future<Either<Failure, bool>> canScheduleExactAlarms();
   Future<Either<Failure, bool>> requestExactAlarmPermission();
+  Future<Either<Failure, bool>> areNotificationsEnabled();
+  Future<Either<Failure, bool>> requestNotificationPermission();
   Future<Either<Failure, void>> syncSchedules();
 }

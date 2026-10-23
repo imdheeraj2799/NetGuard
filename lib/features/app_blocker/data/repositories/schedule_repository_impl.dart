@@ -196,6 +196,30 @@ class ScheduleRepositoryImpl implements ScheduleRepository {
   }
 
   @override
+  Future<Either<Failure, bool>> areNotificationsEnabled() async {
+    try {
+      final enabled = await _nativeDataSource.areNotificationsEnabled();
+      return Right(enabled);
+    } on NativeDataSourceException catch (error) {
+      return Left(PlatformFailure(error.message));
+    } catch (error) {
+      return Left(ServerFailure('Unable to check notification permission: $error'));
+    }
+  }
+
+  @override
+  Future<Either<Failure, bool>> requestNotificationPermission() async {
+    try {
+      final granted = await _nativeDataSource.requestNotificationPermission();
+      return Right(granted);
+    } on NativeDataSourceException catch (error) {
+      return Left(PlatformFailure(error.message));
+    } catch (error) {
+      return Left(ServerFailure('Unable to request notification permission: $error'));
+    }
+  }
+
+  @override
   Future<Either<Failure, void>> syncSchedules() async {
     try {
       await _syncEffectiveBlockedListToVpn();

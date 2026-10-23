@@ -11,6 +11,9 @@ abstract class NativeAppDataSource {
   Future<void> syncSchedules(String schedulesJson);
   Future<bool> canScheduleExactAlarms();
   Future<bool> requestExactAlarmPermission();
+  Future<bool> areNotificationsEnabled();
+  Future<bool> requestNotificationPermission();
+  Future<Map<String, dynamic>?> getInitialNotificationPayload();
 }
 
 class NativeAppDataSourceImpl implements NativeAppDataSource {
@@ -122,6 +125,38 @@ class NativeAppDataSourceImpl implements NativeAppDataSource {
       throw NativeDataSourceException(
         error.message ?? 'Unable to request exact alarm permission',
       );
+    }
+  }
+
+  @override
+  Future<bool> areNotificationsEnabled() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('areNotificationsEnabled');
+      return result ?? true;
+    } on PlatformException {
+      return true;
+    }
+  }
+
+  @override
+  Future<bool> requestNotificationPermission() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('requestNotificationPermission');
+      return result ?? true;
+    } on PlatformException catch (error) {
+      throw NativeDataSourceException(
+        error.message ?? 'Unable to request notification permission',
+      );
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getInitialNotificationPayload() async {
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>('getInitialNotificationPayload');
+      return result;
+    } on PlatformException {
+      return null;
     }
   }
 }
