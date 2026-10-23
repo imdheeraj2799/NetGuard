@@ -354,6 +354,52 @@ void main() {
       verify(() => mockNativeDataSource.syncSchedules(any())).called(1);
     });
 
+    test('areNotificationsEnabled returns Right(bool) from native data source', () async {
+      when(() => mockNativeDataSource.areNotificationsEnabled())
+          .thenAnswer((_) async => true);
+
+      final result = await repository.areNotificationsEnabled();
+
+      expect(result, const Right(true));
+      verify(() => mockNativeDataSource.areNotificationsEnabled()).called(1);
+    });
+
+    test('areNotificationsEnabled returns Left(PlatformFailure) on exception', () async {
+      when(() => mockNativeDataSource.areNotificationsEnabled())
+          .thenThrow(const NativeDataSourceException('failed'));
+
+      final result = await repository.areNotificationsEnabled();
+
+      expect(result, isA<Left>());
+      result.fold(
+        (failure) => expect(failure, isA<PlatformFailure>()),
+        (_) => fail('Should be left'),
+      );
+    });
+
+    test('requestNotificationPermission returns Right(bool) from native data source', () async {
+      when(() => mockNativeDataSource.requestNotificationPermission())
+          .thenAnswer((_) async => true);
+
+      final result = await repository.requestNotificationPermission();
+
+      expect(result, const Right(true));
+      verify(() => mockNativeDataSource.requestNotificationPermission()).called(1);
+    });
+
+    test('requestNotificationPermission returns Left(PlatformFailure) on exception', () async {
+      when(() => mockNativeDataSource.requestNotificationPermission())
+          .thenThrow(const NativeDataSourceException('failed'));
+
+      final result = await repository.requestNotificationPermission();
+
+      expect(result, isA<Left>());
+      result.fold(
+        (failure) => expect(failure, isA<PlatformFailure>()),
+        (_) => fail('Should be left'),
+      );
+    });
+
     test('synchronizes isSchedulePart and whichSchedule to cached apps on save and delete', () async {
       final mockAppLocalDataSource = MockAppLocalDataSource();
       final repoWithApps = ScheduleRepositoryImpl(

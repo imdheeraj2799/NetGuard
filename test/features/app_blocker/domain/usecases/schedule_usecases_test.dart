@@ -5,12 +5,14 @@ import 'package:net_guard/core/error/failure.dart';
 import 'package:net_guard/core/usecase/usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/entities/block_schedule_entity.dart';
 import 'package:net_guard/features/app_blocker/domain/repositories/schedule_repository.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/are_notifications_enabled_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/can_schedule_exact_alarms_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/delete_schedule_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/get_assigned_packages_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/get_effective_blocked_packages_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/get_schedules_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/request_exact_alarm_permission_usecase.dart';
+import 'package:net_guard/features/app_blocker/domain/usecases/request_notification_permission_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/save_schedule_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/sync_schedules_usecase.dart';
 import 'package:net_guard/features/app_blocker/domain/usecases/toggle_schedule_usecase.dart';
@@ -171,6 +173,30 @@ void main() {
 
       expect(result, const Right(null));
       verify(() => repository.syncSchedules()).called(1);
+    });
+  });
+
+  group('AreNotificationsEnabledUseCase', () {
+    test('calls repository areNotificationsEnabled', () async {
+      when(() => repository.areNotificationsEnabled())
+          .thenAnswer((_) async => const Right(true));
+
+      final result = await AreNotificationsEnabledUseCase(repository)(const NoParams());
+
+      expect(result, const Right(true));
+      verify(() => repository.areNotificationsEnabled()).called(1);
+    });
+  });
+
+  group('RequestNotificationPermissionUseCase', () {
+    test('calls repository requestNotificationPermission', () async {
+      when(() => repository.requestNotificationPermission())
+          .thenAnswer((_) async => const Right(true));
+
+      final result = await RequestNotificationPermissionUseCase(repository)(const NoParams());
+
+      expect(result, const Right(true));
+      verify(() => repository.requestNotificationPermission()).called(1);
     });
   });
 }

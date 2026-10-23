@@ -192,5 +192,82 @@ void main() {
       throwsA(isA<NativeDataSourceException>()),
     );
   });
+
+  test('areNotificationsEnabled returns boolean from channel', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'areNotificationsEnabled') {
+            return false;
+          }
+          return null;
+        });
+
+    final result = await dataSource.areNotificationsEnabled();
+    expect(result, isFalse);
+  });
+
+  test('areNotificationsEnabled returns true on PlatformException fallback', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (_) async =>
+              throw PlatformException(code: 'error', message: 'Not supported'),
+        );
+
+    final result = await dataSource.areNotificationsEnabled();
+    expect(result, isTrue);
+  });
+
+  test('requestNotificationPermission returns boolean from channel', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'requestNotificationPermission') {
+            return true;
+          }
+          return null;
+        });
+
+    final result = await dataSource.requestNotificationPermission();
+    expect(result, isTrue);
+  });
+
+  test('requestNotificationPermission converts error to NativeDataSourceException', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (_) async =>
+              throw PlatformException(code: 'error', message: 'Denied'),
+        );
+
+    expect(
+      dataSource.requestNotificationPermission(),
+      throwsA(isA<NativeDataSourceException>()),
+    );
+  });
+
+  test('getInitialNotificationPayload returns payload map from channel', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'getInitialNotificationPayload') {
+            return {'route': '/schedules', 'schedule_id': 's-1'};
+          }
+          return null;
+        });
+
+    final result = await dataSource.getInitialNotificationPayload();
+    expect(result, {'route': '/schedules', 'schedule_id': 's-1'});
+  });
+
+  test('getInitialNotificationPayload returns null on PlatformException', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (_) async =>
+              throw PlatformException(code: 'error', message: 'Unavailable'),
+        );
+
+    final result = await dataSource.getInitialNotificationPayload();
+    expect(result, isNull);
+  });
 }
 
