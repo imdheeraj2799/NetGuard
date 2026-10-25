@@ -25,7 +25,9 @@ object ScheduleAlarmManager {
     fun armNextAlarm(context: Context, schedules: List<NativeBlockSchedule>) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val now = Calendar.getInstance()
-        val nextTransitionMillis = NativeScheduleEngine.getEarliestNextTransitionMillis(schedules, now)
+        val nextScheduleTransitionMillis = NativeScheduleEngine.getEarliestNextTransitionMillis(schedules, now)
+        val nextPauseExpiryMillis = NativeTemporaryPauseStore.getEarliestExpiryMillis(context, now.timeInMillis)
+        val nextTransitionMillis = listOfNotNull(nextScheduleTransitionMillis, nextPauseExpiryMillis).minOrNull()
 
         val intent = Intent(context, ScheduleAlarmReceiver::class.java).apply {
             action = ScheduleAlarmReceiver.ACTION_SCHEDULE_TRANSITION
@@ -34,7 +36,7 @@ object ScheduleAlarmManager {
         val pendingIntent = PendingIntent.getBroadcast(context, ALARM_REQUEST_CODE, intent, flags)
 
         if (nextTransitionMillis != null) {
-            Log.i(TAG, "Arming next schedule alarm at millis: $nextTransitionMillis (in ${(nextTransitionMillis - now.timeInMillis) / 1000}s)")
+            Log.i(TAG, "Arming next transition alarm at millis: $nextTransitionMillis (in ${(nextTransitionMillis - now.timeInMillis) / 1000}s)")
             try {
                 if (canScheduleExactAlarms(context)) {
                     alarmManager.setExactAndAllowWhileIdle(
@@ -53,7 +55,7 @@ object ScheduleAlarmManager {
                 Log.e(TAG, "Failed to schedule exact alarm: ${e.message}")
             }
         } else {
-            Log.d(TAG, "No upcoming schedule transitions; cancelling alarm")
+            Log.d(TAG, "No upcoming schedule or temporary pause transitions; cancelling alarm")
             alarmManager.cancel(pendingIntent)
         }
     }
@@ -71,12 +73,16 @@ object ScheduleAlarmManager {
     @Synchronized
     fun reconcileAndApply(context: Context): Set<String> {
         val now = Calendar.getInstance()
+        // Prune any expired temporary pauses
+        NativeTemporaryPauseStore.pruneExpired(context, now.timeInMillis)
+
         val schedules = NativeScheduleStore.loadSchedules(context)
         val manualPackages = NativeScheduleStore.loadManualBlockedPackages(context)
         val activeSchedulePackages = NativeScheduleEngine.computeActiveSchedulePackages(schedules, now)
+        val activePausePackages = NativeTemporaryPauseStore.getActivePausedPackages(context, now.timeInMillis)
 
-        val effectivePackages = (manualPackages + activeSchedulePackages).toSet()
-        Log.i(TAG, "Reconciling firewall: manual=${manualPackages.size}, scheduled=${activeSchedulePackages.size}, effective=${effectivePackages.size}")
+        val effectivePackages = (manualPackages + activeSchedulePackages + activePausePackages).toSet()
+        Log.i(TAG, "Reconciling firewall: manual=${manualPackages.size}, scheduled=${activeSchedulePackages.size}, paused=${activePausePackages.size}, effective=${effectivePackages.size}")
 
         // Prune deleted or disabled schedules from notification active tracking
         ScheduleNotificationManager.syncSchedules(context, schedules)

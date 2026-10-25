@@ -271,6 +271,20 @@ class MainActivity : FlutterFragmentActivity() {
                 initialNotificationPayload = null
                 result.success(payload)
             }
+            "syncTemporaryPauses" -> {
+                val pausesJson = call.argument<String>("pauses")
+                if (pausesJson != null) {
+                    NativeTemporaryPauseStore.savePausesJson(this, pausesJson)
+                    try {
+                        ScheduleAlarmManager.reconcileAndApply(this)
+                        result.success(null)
+                    } catch (e: Exception) {
+                        result.error("pause_sync_error", "Failed to sync temporary pauses: ${e.message}", null)
+                    }
+                } else {
+                    result.error("invalid_arguments", "pauses argument is required.", null)
+                }
+            }
             else -> result.notImplemented()
         }
     }
