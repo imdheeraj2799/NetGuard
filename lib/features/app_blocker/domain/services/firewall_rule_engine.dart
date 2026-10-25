@@ -44,17 +44,20 @@ class FirewallRuleEngine {
   }
 
   /// Calculates the effective firewall block list:
-  /// EffectiveBlocked = ManualBlocked ∪ ActiveScheduled
+  /// EffectiveBlocked = ManualBlocked ∪ ActiveScheduled ∪ ActiveTemporaryPaused
   Set<String> calculateEffectiveBlockedPackages({
     required Set<String> manualBlockedPackages,
     required List<BlockScheduleEntity> schedules,
     required DateTime currentTime,
+    Set<String> temporaryPausedPackages = const {},
   }) {
     final scheduled = calculateScheduledBlockedPackages(
       schedules: schedules,
       currentTime: currentTime,
     );
-    return Set.unmodifiable(manualBlockedPackages.union(scheduled));
+    return Set.unmodifiable(
+      manualBlockedPackages.union(scheduled).union(temporaryPausedPackages),
+    );
   }
 
   /// Determines why a specific package is blocked (manual, schedule, both, or none).
