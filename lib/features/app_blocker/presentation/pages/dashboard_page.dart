@@ -15,6 +15,11 @@ import '../bloc/schedule_event.dart';
 import '../bloc/schedule_state.dart';
 import '../widgets/app_card.dart';
 import 'schedule_list_page.dart';
+import '../../../temporary_internet_pause/domain/entities/temporary_pause_entity.dart';
+import '../../../temporary_internet_pause/presentation/bloc/temporary_pause_bloc.dart';
+import '../../../temporary_internet_pause/presentation/bloc/temporary_pause_event.dart';
+import '../../../temporary_internet_pause/presentation/bloc/temporary_pause_state.dart';
+import '../../../temporary_internet_pause/presentation/pages/temporary_pause_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -41,6 +46,9 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       context.read<AppBlockerBloc>().add(const CheckVpnStatusEvent());
+      if (_hasTemporaryPauseBloc(context)) {
+        context.read<TemporaryPauseBloc>().add(const ReconcileExpiredPausesEvent());
+      }
       _checkInitialNotificationRoute();
     }
   }
@@ -93,6 +101,54 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
             );
       }
     }
+  }
+
+  Future<void> _navigateToTemporaryPause([AppInfoEntity? preselectedApp]) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TemporaryPausePage(initialApp: preselectedApp),
+      ),
+    );
+    if (mounted) {
+      context.read<AppBlockerBloc>().add(const CheckVpnStatusEvent());
+      if (_hasTemporaryPauseBloc(context)) {
+        context.read<TemporaryPauseBloc>().add(const LoadTemporaryPausesEvent());
+      }
+    }
+  }
+
+  bool _hasTemporaryPauseBloc(BuildContext context) {
+    try {
+      context.read<TemporaryPauseBloc>();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Widget _buildWithPauseState({
+    required BuildContext context,
+    required Widget Function(BuildContext context, TemporaryPauseState pauseState) builder,
+  }) {
+    if (_hasTemporaryPauseBloc(context)) {
+      return BlocBuilder<TemporaryPauseBloc, TemporaryPauseState>(
+        builder: builder,
+      );
+    }
+    return builder(context, const TemporaryPauseLoaded(pauses: []));
+  }
+
+  String _formatPauseDuration(Duration d) {
+    final hours = d.inHours;
+    final minutes = d.inMinutes.remainder(60);
+    final seconds = d.inSeconds.remainder(60);
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
+    }
+    if (minutes > 0) {
+      return '${minutes}m';
+    }
+    return '${seconds}s';
   }
 
   @override
@@ -162,51 +218,61 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
           ],
           child: BlocBuilder<ScheduleBloc, ScheduleState>(
             builder: (context, schedState) {
-              return BlocBuilder<AppBlockerBloc, AppBlockerState>(
-                builder: (context, state) {
-                  return RefreshIndicator(
-                    color: Colors.white,
-                    backgroundColor: AppColors.cardBackground,
-                    onRefresh: () async {
-                      context.read<ScheduleBloc>().add(
-                        const LoadSchedulesEvent(),
-                      );
-                      context.read<AppBlockerBloc>().add(
-                        const LoadInstalledAppsEvent(),
-                      );
-                      await context.read<AppBlockerBloc>().stream.firstWhere(
-                        (s) => s is! AppBlockerLoading,
+              return _buildWithPauseState(
+                context: context,
+                builder: (context, pauseState) {
+                  return BlocBuilder<AppBlockerBloc, AppBlockerState>(
+                    builder: (context, state) {
+                      return RefreshIndicator(
+                        color: Colors.white,
+                        backgroundColor: AppColors.cardBackground,
+                        onRefresh: () async {
+                          context.read<ScheduleBloc>().add(
+                            const LoadSchedulesEvent(),
+                          );
+                          context.read<AppBlockerBloc>().add(
+                            const LoadInstalledAppsEvent(),
+                          );
+                          if (_hasTemporaryPauseBloc(context)) {
+                            context.read<TemporaryPauseBloc>().add(
+                              const LoadTemporaryPausesEvent(),
+                            );
+                          }
+                          await context.read<AppBlockerBloc>().stream.firstWhere(
+                            (s) => s is! AppBlockerLoading,
+                          );
+                        },
+                        child: CustomScrollView(
+                          controller: _scrollController,
+                          slivers: [
+                            // App Bar / Header
+                            SliverToBoxAdapter(
+                              child: _buildHeader(context, state, schedState),
+                            ),
+
+                            // VPN Service Status & Alert Banner
+                            if (state is AppBlockerLoaded)
+                              SliverToBoxAdapter(
+                                child: _buildVpnStatusCard(context, state, schedState),
+                              ),
+
+                            // Search Bar
+                            SliverToBoxAdapter(
+                              child: _buildSearchBar(context, state),
+                            ),
+
+                            // Firewall Status Summary
+                            if (state is AppBlockerLoaded)
+                              SliverToBoxAdapter(
+                                child: _buildStatusSummary(state),
+                              ),
+
+                            // Main Content List / Loading / Error States
+                            _buildContent(context, state, pauseState),
+                          ],
+                        ),
                       );
                     },
-                    child: CustomScrollView(
-                      controller: _scrollController,
-                      slivers: [
-                        // App Bar / Header
-                        SliverToBoxAdapter(
-                          child: _buildHeader(context, state, schedState),
-                        ),
-
-                        // VPN Service Status & Alert Banner
-                        if (state is AppBlockerLoaded)
-                          SliverToBoxAdapter(
-                            child: _buildVpnStatusCard(context, state, schedState),
-                          ),
-
-                        // Search Bar
-                        SliverToBoxAdapter(
-                          child: _buildSearchBar(context, state),
-                        ),
-
-                        // Firewall Status Summary
-                        if (state is AppBlockerLoaded)
-                          SliverToBoxAdapter(
-                            child: _buildStatusSummary(state),
-                          ),
-
-                        // Main Content List / Loading / Error States
-                        _buildContent(context, state),
-                      ],
-                    ),
                   );
                 },
               );
@@ -284,6 +350,15 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              IconButton(
+                key: const Key('header_temporary_pause_button'),
+                icon: const Icon(Icons.timer_outlined, size: 22),
+                color: const Color(0xFFFBBF24),
+                tooltip: 'Temporary Internet Pause',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _navigateToTemporaryPause(),
+              ),
+              const SizedBox(width: 4),
               IconButton(
                 key: const Key('header_schedules_button'),
                 icon: const Icon(Icons.schedule_rounded, size: 22),
@@ -635,7 +710,11 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
     );
   }
 
-  Widget _buildContent(BuildContext context, AppBlockerState state) {
+  Widget _buildContent(
+    BuildContext context,
+    AppBlockerState state,
+    TemporaryPauseState pauseState,
+  ) {
     if (state is AppBlockerInitial || state is AppBlockerLoading) {
       return const SliverFillRemaining(
         child: Center(
@@ -701,6 +780,16 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
     final loaded = state as AppBlockerLoaded;
     final apps = loaded.displayedApps;
 
+    final activePausesMap = <String, TemporaryPauseEntity>{};
+    if (pauseState is TemporaryPauseLoaded) {
+      final now = pauseState.lastTick ?? DateTime.now();
+      for (final p in pauseState.pauses) {
+        if (!p.isExpired(now)) {
+          activePausesMap[p.packageName] = p;
+        }
+      }
+    }
+
     if (loaded.filteredApps.isEmpty) {
       return SliverFillRemaining(
         child: Center(
@@ -755,23 +844,33 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
             final app = apps[index];
             final isRestrictedBySchedule =
                 app.isSchedulePart == true && app.whichSchedule != null;
+            final activePause = activePausesMap[app.packageName];
+            final isTemporarilyPaused = activePause != null;
 
             return AppCard(
               key: ValueKey(app.packageName),
               app: app,
-              onInternetAccessChanged: isRestrictedBySchedule
-                  ? (_) => _showScheduleRestrictedDialog(context, app)
-                  : (isAllowed) {
-                      context.read<AppBlockerBloc>().add(
-                        ToggleAppBlockEvent(
-                          packageName: app.packageName,
-                          isBlocked: !isAllowed,
-                        ),
-                      );
-                    },
-              onRestrictedTap: isRestrictedBySchedule
-                  ? () => _showScheduleRestrictedDialog(context, app)
+              isTemporarilyPaused: isTemporarilyPaused,
+              pauseRemainingText: activePause != null
+                  ? _formatPauseDuration(activePause.remainingTime())
                   : null,
+              onInternetAccessChanged: isTemporarilyPaused
+                  ? (_) => _showTemporaryPauseRestrictedDialog(context, app, activePause)
+                  : (isRestrictedBySchedule
+                      ? (_) => _showScheduleRestrictedDialog(context, app)
+                      : (isAllowed) {
+                          context.read<AppBlockerBloc>().add(
+                            ToggleAppBlockEvent(
+                              packageName: app.packageName,
+                              isBlocked: !isAllowed,
+                            ),
+                          );
+                        }),
+              onRestrictedTap: isTemporarilyPaused
+                  ? () => _showTemporaryPauseRestrictedDialog(context, app, activePause)
+                  : (isRestrictedBySchedule
+                      ? () => _showScheduleRestrictedDialog(context, app)
+                      : null),
             );
           },
           childCount: itemCount,
@@ -866,6 +965,127 @@ class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserv
                 ),
               ),
             ],
+          ],
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            height: 38,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.buttonPrimaryBackground,
+                foregroundColor: AppColors.buttonPrimaryText,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: EdgeInsets.zero,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text(
+                'OK',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTemporaryPauseRestrictedDialog(
+    BuildContext context,
+    AppInfoEntity app,
+    TemporaryPauseEntity pause,
+  ) {
+    final remainingFormatted = _formatPauseDuration(pause.remainingTime());
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.cardBackground,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.cardBorder, width: 1),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF382A0D),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFD97706)),
+              ),
+              child: const Icon(
+                Icons.hourglass_top_rounded,
+                color: Color(0xFFFBBF24),
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Temporary Pause Active',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Internet access for this application is temporarily paused, so you can't enable or disable it manually.",
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF382A0D),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFD97706), width: 0.6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.timer_outlined,
+                    size: 12,
+                    color: Color(0xFFFBBF24),
+                  ),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      'Temporarily paused: $remainingFormatted remaining',
+                      style: const TextStyle(
+                        color: Color(0xFFFBBF24),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
         actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
