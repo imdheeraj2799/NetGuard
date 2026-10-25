@@ -13,12 +13,20 @@ import 'package:net_guard/features/app_blocker/presentation/bloc/schedule_bloc.d
 import 'package:net_guard/features/app_blocker/presentation/bloc/schedule_event.dart';
 import 'package:net_guard/features/app_blocker/presentation/bloc/schedule_state.dart';
 import 'package:net_guard/features/app_blocker/presentation/widgets/app_card.dart';
+import 'package:net_guard/features/temporary_internet_pause/domain/entities/temporary_pause_entity.dart';
+import 'package:net_guard/features/temporary_internet_pause/presentation/bloc/temporary_pause_bloc.dart';
+import 'package:net_guard/features/temporary_internet_pause/presentation/bloc/temporary_pause_event.dart';
+import 'package:net_guard/features/temporary_internet_pause/presentation/bloc/temporary_pause_state.dart';
 
 class MockAppBlockerBloc extends MockBloc<AppBlockerEvent, AppBlockerState>
     implements AppBlockerBloc {}
 
 class MockScheduleBloc extends MockBloc<ScheduleEvent, ScheduleState>
     implements ScheduleBloc {}
+
+class MockTemporaryPauseBloc
+    extends MockBloc<TemporaryPauseEvent, TemporaryPauseState>
+    implements TemporaryPauseBloc {}
 
 void main() {
   setUpAll(() {
@@ -27,6 +35,7 @@ void main() {
 
   late MockAppBlockerBloc bloc;
   late MockScheduleBloc scheduleBloc;
+  late MockTemporaryPauseBloc pauseBloc;
 
   const testApps = [
     AppInfoEntity(
@@ -44,7 +53,10 @@ void main() {
   setUp(() {
     bloc = MockAppBlockerBloc();
     scheduleBloc = MockScheduleBloc();
+    pauseBloc = MockTemporaryPauseBloc();
     when(() => scheduleBloc.state).thenReturn(const ScheduleInitial());
+    when(() => pauseBloc.state)
+        .thenReturn(const TemporaryPauseLoaded(pauses: []));
   });
 
   Widget buildTestWidget() {
@@ -53,6 +65,7 @@ void main() {
         providers: [
           BlocProvider<AppBlockerBloc>.value(value: bloc),
           BlocProvider<ScheduleBloc>.value(value: scheduleBloc),
+          BlocProvider<TemporaryPauseBloc>.value(value: pauseBloc),
         ],
         child: const DashboardPage(),
       ),
@@ -437,6 +450,83 @@ void main() {
 
     expect(
       find.text("This application is part of a schedule, so you can't enable or disable it manually."),
+      findsOneWidget,
+    );
+
+    // Ensure ToggleAppBlockEvent was never called
+    verifyNever(() => bloc.add(any(that: isA<ToggleAppBlockEvent>())));
+  });
+
+  testWidgets(
+      'displays temporary pause dialogue when tapping temporarily paused app card or toggle and does not toggle block status',
+      (tester) async {
+    const pausedApp = AppInfoEntity(
+      appName: 'Paused Video Player',
+      packageName: 'com.paused.videoplayer',
+      isBlocked: false,
+    );
+
+    final pause = TemporaryPauseEntity(
+      id: 'pause-test-1',
+      packageName: 'com.paused.videoplayer',
+      appName: 'Paused Video Player',
+      startTime: DateTime.now(),
+      pauseUntil: DateTime.now().add(const Duration(minutes: 15)),
+      duration: const Duration(minutes: 15),
+      isCustom: false,
+    );
+
+    when(() => bloc.state).thenReturn(
+      const AppBlockerLoaded(
+        originalApps: [pausedApp],
+        filteredApps: [pausedApp],
+        hasReachedMax: true,
+      ),
+    );
+    when(() => pauseBloc.state).thenReturn(
+      TemporaryPauseLoaded(pauses: [pause]),
+    );
+
+    await tester.pumpWidget(buildTestWidget());
+
+    expect(find.text('Paused Video Player'), findsOneWidget);
+    expect(find.text('Temporarily Paused'), findsOneWidget);
+
+    // Tap the switch
+    final switchFinder =
+        find.byKey(const Key('app_card_toggle_com.paused.videoplayer'));
+    await tester.tap(switchFinder);
+    await tester.pumpAndSettle();
+
+    // Verify dialog appears with exact required text
+    expect(
+      find.text(
+          "Internet access for this application is temporarily paused, so you can't enable or disable it manually."),
+      findsOneWidget,
+    );
+    expect(find.text('Temporary Pause Active'), findsOneWidget);
+
+    // Verify dialog has OK button
+    expect(find.text('OK'), findsOneWidget);
+
+    // Tap OK to close dialog
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    // Dialog is dismissed
+    expect(
+      find.text(
+          "Internet access for this application is temporarily paused, so you can't enable or disable it manually."),
+      findsNothing,
+    );
+
+    // Now tap the card itself
+    await tester.tap(find.text('Paused Video Player'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+          "Internet access for this application is temporarily paused, so you can't enable or disable it manually."),
       findsOneWidget,
     );
 

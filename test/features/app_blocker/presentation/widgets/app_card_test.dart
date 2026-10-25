@@ -137,4 +137,50 @@ void main() {
     expect(toggled, isFalse);
     expect(restrictedTaps, 2);
   });
+
+  testWidgets('renders temporary pause badge and invokes onRestrictedTap instead of onInternetAccessChanged when app is temporarily paused', (tester) async {
+    const pausedApp = AppInfoEntity(
+      appName: 'Netflix',
+      packageName: 'com.netflix.mediaclient',
+      isBlocked: false,
+    );
+
+    bool toggled = false;
+    int restrictedTaps = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppCard(
+            app: pausedApp,
+            isTemporarilyPaused: true,
+            pauseRemainingText: '14m',
+            onInternetAccessChanged: (_) => toggled = true,
+            onRestrictedTap: () => restrictedTaps++,
+          ),
+        ),
+      ),
+    );
+
+    // Verify pause badge and status
+    expect(find.text('14m'), findsOneWidget);
+    expect(find.text('Temporarily Paused'), findsOneWidget);
+    expect(find.byIcon(Icons.hourglass_top_rounded), findsOneWidget);
+
+    // Tapping the switch must NOT toggle internet access, but call onRestrictedTap
+    final switchFinder = find.byKey(const Key('app_card_toggle_com.netflix.mediaclient'));
+    expect(switchFinder, findsOneWidget);
+    await tester.tap(switchFinder);
+    await tester.pump();
+
+    expect(toggled, isFalse);
+    expect(restrictedTaps, 1);
+
+    // Tapping the card body also calls onRestrictedTap
+    await tester.tap(find.text('Netflix'));
+    await tester.pump();
+
+    expect(toggled, isFalse);
+    expect(restrictedTaps, 2);
+  });
 }
