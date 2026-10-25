@@ -9,6 +9,8 @@ import 'features/app_blocker/presentation/bloc/app_blocker_event.dart';
 import 'features/app_blocker/presentation/bloc/schedule_bloc.dart';
 import 'features/app_blocker/presentation/bloc/schedule_event.dart';
 import 'features/app_blocker/presentation/pages/dashboard_page.dart';
+import 'features/temporary_internet_pause/presentation/bloc/temporary_pause_bloc.dart';
+import 'features/temporary_internet_pause/presentation/bloc/temporary_pause_event.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +32,10 @@ class NetGuardApp extends StatelessWidget {
       BlocProvider(
         create: (_) => serviceLocator<ScheduleBloc>()
           ..add(const LoadSchedulesEvent()),
+      ),
+      BlocProvider(
+        create: (_) => serviceLocator<TemporaryPauseBloc>()
+          ..add(const LoadTemporaryPausesEvent()),
       ),
     ],
     child: MaterialApp(
