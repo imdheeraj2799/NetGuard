@@ -14,6 +14,7 @@ import '../../features/app_blocker/domain/repositories/schedule_repository.dart'
 import '../../features/app_blocker/domain/services/firewall_rule_engine.dart';
 import '../../features/app_blocker/domain/services/schedule_conflict_validator.dart';
 import '../../features/app_blocker/domain/services/schedule_engine.dart';
+import '../../features/app_blocker/domain/usecases/are_notifications_enabled_usecase.dart';
 import '../../features/app_blocker/domain/usecases/can_schedule_exact_alarms_usecase.dart';
 import '../../features/app_blocker/domain/usecases/delete_schedule_usecase.dart';
 import '../../features/app_blocker/domain/usecases/get_assigned_packages_usecase.dart';
@@ -22,6 +23,7 @@ import '../../features/app_blocker/domain/usecases/get_installed_apps_usecase.da
 import '../../features/app_blocker/domain/usecases/get_schedules_usecase.dart';
 import '../../features/app_blocker/domain/usecases/get_vpn_status_usecase.dart';
 import '../../features/app_blocker/domain/usecases/request_exact_alarm_permission_usecase.dart';
+import '../../features/app_blocker/domain/usecases/request_notification_permission_usecase.dart';
 import '../../features/app_blocker/domain/usecases/restart_vpn_usecase.dart';
 import '../../features/app_blocker/domain/usecases/save_schedule_usecase.dart';
 import '../../features/app_blocker/domain/usecases/sync_schedules_usecase.dart';
@@ -31,12 +33,23 @@ import '../../features/app_blocker/domain/usecases/watch_vpn_status_usecase.dart
 import '../../features/app_blocker/presentation/bloc/app_blocker_bloc.dart';
 import '../../features/app_blocker/presentation/bloc/schedule_bloc.dart';
 
+import '../../features/temporary_internet_pause/data/datasources/temporary_pause_local_data_source.dart';
+import '../../features/temporary_internet_pause/data/datasources/temporary_pause_native_data_source.dart';
+import '../../features/temporary_internet_pause/data/repositories/temporary_pause_repository_impl.dart';
+import '../../features/temporary_internet_pause/domain/repositories/temporary_pause_repository.dart';
+import '../../features/temporary_internet_pause/domain/usecases/cancel_temporary_pause_usecase.dart';
+import '../../features/temporary_internet_pause/domain/usecases/create_temporary_pause_usecase.dart';
+import '../../features/temporary_internet_pause/domain/usecases/get_active_pauses_usecase.dart';
+import '../../features/temporary_internet_pause/domain/usecases/reconcile_expired_pauses_usecase.dart';
+import '../../features/temporary_internet_pause/presentation/bloc/temporary_pause_bloc.dart';
+
 final serviceLocator = GetIt.instance;
 
 Future<void> initializeDependencies({
   Box<Map>? appsBox,
   Box<dynamic>? settingsBox,
   Box<Map>? schedulesBox,
+  Box<Map>? temporaryPausesBox,
 }) async {
   if (serviceLocator.isRegistered<AppBlockerBloc>()) return;
 
@@ -49,6 +62,9 @@ Future<void> initializeDependencies({
   final resolvedSchedulesBox =
       schedulesBox ??
       await Hive.openBox<Map>(ScheduleLocalDataSourceImpl.schedulesBoxName);
+  final resolvedPausesBox =
+      temporaryPausesBox ??
+      await Hive.openBox<Map>(TemporaryPauseLocalDataSourceImpl.pausesBoxName);
 
   serviceLocator
     ..registerLazySingleton<SharedPreferences>(() => preferences)
@@ -63,6 +79,10 @@ Future<void> initializeDependencies({
     ..registerLazySingleton<Box<Map>>(
       () => resolvedSchedulesBox,
       instanceName: 'schedulesBox',
+    )
+    ..registerLazySingleton<Box<Map>>(
+      () => resolvedPausesBox,
+      instanceName: 'temporaryPausesBox',
     )
     ..registerLazySingleton<NativeAppDataSource>(NativeAppDataSourceImpl.new)
     ..registerLazySingleton<InstalledAppsGateway>(InstalledAppsGatewayImpl.new)
@@ -128,6 +148,12 @@ Future<void> initializeDependencies({
     ..registerLazySingleton(
       () => RequestExactAlarmPermissionUseCase(serviceLocator()),
     )
+    ..registerLazySingleton(
+      () => AreNotificationsEnabledUseCase(serviceLocator()),
+    )
+    ..registerLazySingleton(
+      () => RequestNotificationPermissionUseCase(serviceLocator()),
+    )
     ..registerLazySingleton(() => SyncSchedulesUseCase(serviceLocator()))
     ..registerFactory(
       () => AppBlockerBloc(
@@ -147,6 +173,35 @@ Future<void> initializeDependencies({
         getAssignedPackages: serviceLocator(),
         canScheduleExactAlarms: serviceLocator(),
         requestExactAlarmPermission: serviceLocator(),
+        areNotificationsEnabled: serviceLocator(),
+        requestNotificationPermission: serviceLocator(),
+      ),
+    )
+    ..registerLazySingleton<TemporaryPauseLocalDataSource>(
+      () => TemporaryPauseLocalDataSourceImpl(
+        pausesBox: resolvedPausesBox,
+        preferences: serviceLocator(),
+      ),
+    )
+    ..registerLazySingleton<TemporaryPauseNativeDataSource>(
+      TemporaryPauseNativeDataSourceImpl.new,
+    )
+    ..registerLazySingleton<TemporaryPauseRepository>(
+      () => TemporaryPauseRepositoryImpl(
+        localDataSource: serviceLocator(),
+        nativeDataSource: serviceLocator(),
+      ),
+    )
+    ..registerLazySingleton(() => GetActivePausesUseCase(serviceLocator()))
+    ..registerLazySingleton(() => CreateTemporaryPauseUseCase(serviceLocator()))
+    ..registerLazySingleton(() => CancelTemporaryPauseUseCase(serviceLocator()))
+    ..registerLazySingleton(() => ReconcileExpiredPausesUseCase(serviceLocator()))
+    ..registerFactory(
+      () => TemporaryPauseBloc(
+        getActivePauses: serviceLocator(),
+        createPause: serviceLocator(),
+        cancelPause: serviceLocator(),
+        reconcileExpiredPauses: serviceLocator(),
       ),
     );
 }
